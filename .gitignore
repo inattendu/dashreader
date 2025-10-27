@@ -1,0 +1,25 @@
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build
+# Note: main.js must be tracked for plugin releases
+main.js.map
+*.js.map
+
+# Editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+Thumbs.db
+.cache
+
+# Obsidian
+.obsidian/
