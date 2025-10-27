@@ -13,6 +13,7 @@ export class RSVPEngine {
   private pausedTime: number = 0;
   private lastPauseTime: number = 0;
   private headings: HeadingInfo[] = [];
+  private wordsReadInSession: number = 0;
 
   constructor(
     settings: DashReaderSettings,
@@ -68,6 +69,7 @@ export class RSVPEngine {
     if (this.startTime === 0) {
       this.startTime = Date.now();
       this.startWpm = this.settings.wpm;
+      this.wordsReadInSession = 0; // Reset slow start counter
     } else if (this.lastPauseTime > 0) {
       // Si on reprend après une pause, ajouter le temps de pause
       this.pausedTime += Date.now() - this.lastPauseTime;
@@ -95,6 +97,7 @@ export class RSVPEngine {
     this.pausedTime = 0;
     this.lastPauseTime = 0;
     this.startWpm = 0;
+    this.wordsReadInSession = 0; // Reset slow start counter
   }
 
   reset(): void {
@@ -142,8 +145,18 @@ export class RSVPEngine {
     const chunk = this.getChunk(this.currentIndex);
     this.onWordChange(chunk);
 
-    const delay = this.calculateDelay(chunk.text);
+    let delay = this.calculateDelay(chunk.text);
 
+    // Slow start: gradually increase speed over first 5 words
+    // Inspired by Stutter: ease into reading to avoid jarring start
+    const SLOW_START_WORDS = 5;
+    if (this.wordsReadInSession < SLOW_START_WORDS) {
+      const remainingSlowWords = SLOW_START_WORDS - this.wordsReadInSession;
+      const slowStartMultiplier = 1 + (remainingSlowWords / SLOW_START_WORDS);
+      delay *= slowStartMultiplier;
+    }
+
+    this.wordsReadInSession++;
     this.currentIndex += this.settings.chunkSize;
 
     this.timer = window.setTimeout(() => {
@@ -232,10 +245,18 @@ export class RSVPEngine {
     }
 
     // Micropause pour la ponctuation (fin de texte)
-    if (/[.!?;:]$/.test(text)) {
-      multiplier *= this.settings.micropausePunctuation;
-    } else if (/[,]$/.test(text)) {
-      multiplier *= Math.max(1.0, this.settings.micropausePunctuation - 0.3);
+    // Distinction: sentences (.,!?) vs other punctuation (:;,)
+    if (/[.!?]$/.test(text)) {
+      // Sentence-ending punctuation: full pause
+      multiplier *= this.settings.micropausePunctuation; // 2.5x
+    } else if (/[;:,]$/.test(text)) {
+      // Other punctuation: lighter pause
+      multiplier *= 1.5;
+    }
+
+    // Micropause pour les nombres (dates, statistiques, années, etc.)
+    if (/\d/.test(text)) {
+      multiplier *= 1.8;
     }
 
     // Micropause pour les mots longs (>8 caractères)
@@ -441,10 +462,18 @@ export class RSVPEngine {
       }
 
       // Micropause pour la ponctuation (fin de texte)
-      if (/[.!?;:]$/.test(word)) {
-        multiplier *= this.settings.micropausePunctuation;
-      } else if (/[,]$/.test(word)) {
-        multiplier *= Math.max(1.0, this.settings.micropausePunctuation - 0.3);
+      // Distinction: sentences (.,!?) vs other punctuation (:;,)
+      if (/[.!?]$/.test(word)) {
+        // Sentence-ending punctuation: full pause
+        multiplier *= this.settings.micropausePunctuation; // 2.5x
+      } else if (/[;:,]$/.test(word)) {
+        // Other punctuation: lighter pause
+        multiplier *= 1.5;
+      }
+
+      // Micropause pour les nombres (dates, statistiques, années, etc.)
+      if (/\d/.test(word)) {
+        multiplier *= 1.8;
       }
 
       // Micropause pour les mots longs (>8 caractères)

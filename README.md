@@ -18,8 +18,11 @@ Instead of your eyes moving across lines of text, the text comes to you. Each wo
 - Context display (surrounding words preview)
 
 ### Intelligent Pacing
-- **Smart micropauses** based on punctuation, word length, and paragraphs
-  - Sentence punctuation (.,!?): 2.5x delay
+- **Slow start** - gradual speed increase over first 5 words to ease into reading
+- **Smart micropauses** based on content type, punctuation, word length, and structure
+  - Sentence-ending punctuation (.,!?): 2.5x delay
+  - Other punctuation (;:,): 1.5x delay
+  - Numbers and dates: 1.8x delay
   - Long words (>8 chars): 1.4x delay
   - Paragraph breaks: 2.5x delay
 - **Heading-aware pauses** - longer pauses before H1 (3x), H2 (2.5x), H3 (2x), etc.

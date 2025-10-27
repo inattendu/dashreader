@@ -44,6 +44,7 @@ var RSVPEngine = class {
     this.pausedTime = 0;
     this.lastPauseTime = 0;
     this.headings = [];
+    this.wordsReadInSession = 0;
     this.settings = settings;
     this.onWordChange = onWordChange;
     this.onComplete = onComplete;
@@ -78,6 +79,7 @@ var RSVPEngine = class {
     if (this.startTime === 0) {
       this.startTime = Date.now();
       this.startWpm = this.settings.wpm;
+      this.wordsReadInSession = 0;
     } else if (this.lastPauseTime > 0) {
       this.pausedTime += Date.now() - this.lastPauseTime;
       this.lastPauseTime = 0;
@@ -99,6 +101,7 @@ var RSVPEngine = class {
     this.pausedTime = 0;
     this.lastPauseTime = 0;
     this.startWpm = 0;
+    this.wordsReadInSession = 0;
   }
   reset() {
     this.stop();
@@ -138,7 +141,14 @@ var RSVPEngine = class {
     }
     const chunk = this.getChunk(this.currentIndex);
     this.onWordChange(chunk);
-    const delay = this.calculateDelay(chunk.text);
+    let delay = this.calculateDelay(chunk.text);
+    const SLOW_START_WORDS = 5;
+    if (this.wordsReadInSession < SLOW_START_WORDS) {
+      const remainingSlowWords = SLOW_START_WORDS - this.wordsReadInSession;
+      const slowStartMultiplier = 1 + remainingSlowWords / SLOW_START_WORDS;
+      delay *= slowStartMultiplier;
+    }
+    this.wordsReadInSession++;
     this.currentIndex += this.settings.chunkSize;
     this.timer = window.setTimeout(() => {
       this.displayNextWord();
@@ -196,10 +206,13 @@ var RSVPEngine = class {
     if (/^[-*+•]/.test(trimmedText)) {
       multiplier *= 1.8;
     }
-    if (/[.!?;:]$/.test(text)) {
+    if (/[.!?]$/.test(text)) {
       multiplier *= this.settings.micropausePunctuation;
-    } else if (/[,]$/.test(text)) {
-      multiplier *= Math.max(1, this.settings.micropausePunctuation - 0.3);
+    } else if (/[;:,]$/.test(text)) {
+      multiplier *= 1.5;
+    }
+    if (/\d/.test(text)) {
+      multiplier *= 1.8;
     }
     if (text.length > 8) {
       multiplier *= this.settings.micropauseLongWords;
@@ -344,10 +357,13 @@ var RSVPEngine = class {
       if (/^[-*+•]/.test(trimmedText)) {
         multiplier *= 1.8;
       }
-      if (/[.!?;:]$/.test(word)) {
+      if (/[.!?]$/.test(word)) {
         multiplier *= this.settings.micropausePunctuation;
-      } else if (/[,]$/.test(word)) {
-        multiplier *= Math.max(1, this.settings.micropausePunctuation - 0.3);
+      } else if (/[;:,]$/.test(word)) {
+        multiplier *= 1.5;
+      }
+      if (/\d/.test(word)) {
+        multiplier *= 1.8;
       }
       if (word.length > 8) {
         multiplier *= this.settings.micropauseLongWords;
