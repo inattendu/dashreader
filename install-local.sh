@@ -11,10 +11,20 @@ NC='\033[0m' # No Color
 echo -e "${BLUE}🚀 Installation locale de DashReader${NC}"
 echo ""
 
-# Demander le chemin du vault
-echo -e "${YELLOW}📂 Entrez le chemin complet de votre vault Obsidian:${NC}"
-echo -e "${BLUE}   (Ex: /Users/nom/Documents/MonVault)${NC}"
-read -p "Vault path: " VAULT_PATH
+# Vérifier que le chemin du vault est fourni en argument
+if [ -z "$1" ]; then
+  echo -e "${RED}❌ Erreur: Chemin du vault manquant${NC}"
+  echo ""
+  echo -e "${YELLOW}Usage:${NC}"
+  echo -e "  ./install-local.sh /path/to/vault"
+  echo ""
+  echo -e "${BLUE}Exemple:${NC}"
+  echo -e "  ./install-local.sh /Users/nom/Documents/MonVault"
+  echo ""
+  exit 1
+fi
+
+VAULT_PATH="$1"
 
 # Vérifier que le vault existe
 if [ ! -d "$VAULT_PATH" ]; then
