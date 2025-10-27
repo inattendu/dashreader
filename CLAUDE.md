@@ -140,3 +140,88 @@ cp main.js manifest.json styles.css /path/to/vault/.obsidian/plugins/dashreader/
 - **Word index vs position**: Always use word index (count) after parsing, never character position from raw text
 - **Event throttling**: Cursor tracking uses 150ms throttle to balance responsiveness and performance
 - **Styling**: Use CSS variables for theme compatibility (`var(--text-muted)`, etc.)
+
+## Obsidian Plugin Guidelines (CRITICAL)
+
+These guidelines from https://docs.obsidian.md/Plugins/Releasing/Plugin+guidelines MUST be followed to pass review.
+
+### Security (CRITICAL - Will fail review)
+
+**❌ NEVER use innerHTML/outerHTML with user input**
+- User notes can contain `<script>` tags that will execute
+- Always escape HTML or use DOM API (`createEl()`, `createDiv()`, `createSpan()`)
+- Bad: `el.innerHTML = userText`
+- Good: `el.textContent = userText` or escape HTML first
+
+**Example - Escaping HTML:**
+```typescript
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, '&amp;')
+             .replace(/</g, '&lt;')
+             .replace(/>/g, '&gt;')
+             .replace(/"/g, '&quot;')
+             .replace(/'/g, '&#039;');
+}
+```
+
+### Resource Management (CRITICAL)
+
+**❌ DO NOT call `detachLeavesOfType()` in `onunload()`**
+- Prevents Obsidian from restoring leaf positions during plugin updates
+- Leaves will be reinitialized automatically at their original position
+- Simply remove the line from `onunload()`
+
+### Styling (Required for consistency)
+
+**❌ Avoid hardcoded inline styles**
+- Bad: `el.style.color = 'red'`
+- Good: Use CSS classes and CSS variables
+```typescript
+el.addCls('warning-text');
+// In CSS: .warning-text { color: var(--text-error); }
+```
+
+**❌ No inline styles in innerHTML**
+- Bad: `<div style="color: red">`
+- Good: `<div class="warning-text">`
+
+### Logging (Best practice)
+
+**Minimize console.log() usage**
+- Remove debug logs before release
+- Keep only error logs: `console.error()`
+- The console should be clean by default
+
+### DOM Manipulation
+
+**Use Obsidian helper functions**
+- `containerEl.createEl()` - Create any element
+- `containerEl.createDiv()` - Create div
+- `containerEl.createSpan()` - Create span
+- `el.empty()` - Clear element contents
+- Never use `innerHTML` for user content
+
+### UI Text
+
+**Use sentence case, not Title Case**
+- Good: "Template folder location"
+- Bad: "Template Folder Location"
+
+**Use `setHeading()` instead of HTML headings**
+```typescript
+new Setting(containerEl).setName('Section name').setHeading();
+```
+
+### App Instance
+
+**Use `this.app`, never `window.app`**
+- The global `app` is for debugging only
+- Always use the reference from your plugin: `this.app`
+
+### TypeScript
+
+**Prefer `const` and `let` over `var`**
+- `var` is obsolete in modern JavaScript
+
+**Prefer `async/await` over Promises**
+- More readable than `.then()` chains
