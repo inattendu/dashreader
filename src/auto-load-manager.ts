@@ -387,14 +387,6 @@ export class AutoLoadManager {
     if (content.selection && content.selection.length > TEXT_LIMITS.minSelectionLength) {
       if (content.selection !== this.state.lastSelection) {
         this.state.lastSelection = content.selection;
-        console.log(
-          'DashReader: Auto-loading selection',
-          content.selection.length,
-          'characters from',
-          content.fileName,
-          'line',
-          content.lineNumber
-        );
         this.loadTextCallback(content.selection, {
           fileName: content.fileName,
           lineNumber: content.lineNumber,
@@ -407,21 +399,6 @@ export class AutoLoadManager {
     if (content.fullContent && content.fullContent.trim().length > TEXT_LIMITS.minContentLength) {
       if (content.cursorPosition !== this.state.lastCursorPosition) {
         const positionDiff = Math.abs(content.cursorPosition! - this.state.lastCursorPosition);
-        console.log(
-          'DashReader: Cursor moved from',
-          this.state.lastCursorPosition,
-          'to',
-          content.cursorPosition,
-          '(diff:',
-          positionDiff,
-          ')'
-        );
-        console.log(
-          'DashReader: Reloading from cursor position',
-          content.cursorPosition,
-          'in',
-          content.fileName
-        );
         this.loadTextCallback(content.fullContent, {
           fileName: content.fileName,
           cursorPosition: content.cursorPosition,
@@ -474,12 +451,6 @@ export class AutoLoadManager {
 
       // Priority 1: Load selection if exists
       if (content.selection && content.selection.length > TEXT_LIMITS.minSelectionLength) {
-        console.log(
-          'DashReader: Auto-loading selection',
-          content.selection.length,
-          'characters from line',
-          content.lineNumber
-        );
         this.loadTextCallback(content.selection, {
           fileName: content.fileName,
           lineNumber: content.lineNumber,
@@ -489,7 +460,6 @@ export class AutoLoadManager {
 
       // Priority 2: Load full content from cursor position
       if (content.fullContent && content.fullContent.trim().length > TEXT_LIMITS.minContentLength) {
-        console.log('DashReader: Auto-loading entire page from cursor position', content.cursorPosition);
         this.loadTextCallback(content.fullContent, {
           fileName: content.fileName,
           cursorPosition: content.cursorPosition,

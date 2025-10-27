@@ -26,8 +26,6 @@ export class RSVPEngine {
   }
 
   setText(text: string, startPosition?: number, startWordIndex?: number): void {
-    console.log('DashReader Engine: setText called with startPosition:', startPosition, 'startWordIndex:', startWordIndex);
-
     // Nettoyer et diviser le texte en mots
     // Important: preserve line breaks by replacing them with a marker FIRST
     const cleaned = text
@@ -36,11 +34,9 @@ export class RSVPEngine {
       .trim();
 
     this.words = cleaned.split(/\s+/);
-    console.log('DashReader Engine: Total words after split:', this.words.length);
 
     // Extraire les headings avec leur position (before replacing markers)
     this.extractHeadings();
-    console.log('DashReader Engine: Extracted', this.headings.length, 'headings');
 
     // Replace line break markers with actual line breaks for display
     this.words = this.words.map(word =>
@@ -50,16 +46,13 @@ export class RSVPEngine {
     // Utiliser l'index du mot si fourni (prioritaire)
     if (startWordIndex !== undefined) {
       this.currentIndex = Math.max(0, Math.min(startWordIndex, this.words.length - 1));
-      console.log('DashReader Engine: Starting at word index', this.currentIndex, '/', this.words.length, '(from startWordIndex)');
     } else if (startPosition !== undefined && startPosition > 0) {
       // Fallback: calculer depuis la position (deprecated)
       const textUpToCursor = text.substring(0, startPosition);
       const wordsBeforeCursor = textUpToCursor.trim().split(/\s+/).length;
       this.currentIndex = Math.min(wordsBeforeCursor, this.words.length - 1);
-      console.log('DashReader Engine: Starting at word index', this.currentIndex, '/', this.words.length, '(from startPosition)');
     } else {
       this.currentIndex = 0;
-      console.log('DashReader Engine: Starting at beginning (no start position)');
     }
   }
 

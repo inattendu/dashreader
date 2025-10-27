@@ -62,7 +62,13 @@ DashReader is an Obsidian plugin implementing RSVP (Rapid Serial Visual Presenta
 - **Navigation**: Click heading to jump, click ▼ dropdown for same-level navigation
   - `navigateToHeading(wordIndex)` preserves playback state
   - Dropdown menu shows all headings of same level with numbering
+  - Menu created in `document.body` with fixed positioning for proper display
+  - Centered under breadcrumb with viewport overflow protection
 - **Initial Display**: Breadcrumb shown immediately on `loadText()`, not just during playback
+- **Update Optimization**: Breadcrumb only redraws when heading context changes
+  - `lastHeadingContext` property caches previous context
+  - `hasHeadingContextChanged()` compares new vs old context
+  - Prevents DOM recreation on every word, keeps dropdown clickable during reading
 
 **Callout Support** (v1.4.0): Full integration with Obsidian callouts:
 - Parser marks callouts: `> [!type] Title` → `[CALLOUT:type]Title`
@@ -126,6 +132,23 @@ Settings are defined in `src/types.ts` as:
 - Defaults: `DEFAULT_SETTINGS` const
 
 UI is built in `src/settings.ts` using Obsidian's Setting API. Inline settings in the view mirror the main settings tab.
+
+**Enhanced Settings UI** (v1.4.0):
+- **Editable Numeric Inputs**: All sliders now have editable text inputs displaying current values
+  - Bidirectional sync: slider ↔ input
+  - Validation and clamping to min/max bounds
+  - Unit labels (px, s, x) displayed but non-editable
+  - Implementation via `createSliderWithInput()` helper method
+- **Extended WPM Range**: Max WPM increased from 1000 to 5000 for ultra-fast reading
+- **Complete Micropause Controls**: All 8 micropause multipliers exposed in settings tab
+  - Sentence-ending punctuation (.,!?)
+  - Other punctuation (;:,)
+  - Numbers and dates
+  - Long words (>8 chars)
+  - Paragraph breaks
+  - Section markers (1., I., etc.)
+  - List bullets (-, *, +, •)
+  - Obsidian callouts
 
 ### Micropause System
 

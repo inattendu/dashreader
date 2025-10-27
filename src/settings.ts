@@ -9,6 +9,74 @@ export class DashReaderSettingTab extends PluginSettingTab {
     this.plugin = plugin;
   }
 
+  /**
+   * Helper method to create a slider with an editable numeric display
+   */
+  private createSliderWithInput(
+    setting: Setting,
+    min: number,
+    max: number,
+    step: number,
+    value: number,
+    unit: string = '',
+    onChange: (value: number) => Promise<void>
+  ): void {
+    let inputEl: HTMLInputElement;
+
+    // Add slider
+    setting.addSlider(slider => slider
+      .setLimits(min, max, step)
+      .setValue(value)
+      .setDynamicTooltip()
+      .onChange(async (newValue) => {
+        inputEl.value = newValue.toString();
+        await onChange(newValue);
+      }));
+
+    // Add editable input
+    inputEl = setting.controlEl.createEl('input', {
+      type: 'text',
+      value: value.toString()
+    });
+    inputEl.style.width = '50px';
+    inputEl.style.textAlign = 'center';
+    inputEl.style.marginLeft = '10px';
+    inputEl.style.border = '1px solid var(--background-modifier-border)';
+    inputEl.style.borderRadius = '3px';
+    inputEl.style.padding = '2px 4px';
+
+    // Add unit label if provided
+    if (unit) {
+      const unitLabel = setting.controlEl.createSpan({ text: unit });
+      unitLabel.style.marginLeft = '4px';
+      unitLabel.style.opacity = '0.7';
+    }
+
+    // Update slider when input changes
+    inputEl.addEventListener('change', async () => {
+      let newValue = parseFloat(inputEl.value);
+
+      // Validate and clamp value
+      if (isNaN(newValue)) {
+        newValue = value; // Reset to current value if invalid
+      } else {
+        newValue = Math.max(min, Math.min(max, newValue));
+        // Round to step precision
+        newValue = Math.round(newValue / step) * step;
+      }
+
+      inputEl.value = newValue.toString();
+
+      // Update slider
+      const sliderEl = setting.controlEl.querySelector('input[type="range"]') as HTMLInputElement;
+      if (sliderEl) {
+        sliderEl.value = newValue.toString();
+      }
+
+      await onChange(newValue);
+    });
+  }
+
   display(): void {
     const { containerEl } = this;
     containerEl.empty();
@@ -18,41 +86,47 @@ export class DashReaderSettingTab extends PluginSettingTab {
     // Section: Lecture
     containerEl.createEl('h3', { text: 'Reading Settings' });
 
-    new Setting(containerEl)
+    const wpmSetting = new Setting(containerEl)
       .setName('Words per minute (WPM)')
-      .setDesc('Reading speed (50-1000)')
-      .addSlider(slider => slider
-        .setLimits(50, 1000, 25)
-        .setValue(this.plugin.settings.wpm)
-        .setDynamicTooltip()
-        .onChange(async (value) => {
-          this.plugin.settings.wpm = value;
-          await this.plugin.saveSettings();
-        }));
+      .setDesc('Reading speed (50-5000)');
+    this.createSliderWithInput(
+      wpmSetting,
+      50, 5000, 25,
+      this.plugin.settings.wpm,
+      '',
+      async (value) => {
+        this.plugin.settings.wpm = value;
+        await this.plugin.saveSettings();
+      }
+    );
 
-    new Setting(containerEl)
+    const chunkSetting = new Setting(containerEl)
       .setName('Words at a time')
-      .setDesc('Number of words displayed simultaneously (1-5)')
-      .addSlider(slider => slider
-        .setLimits(1, 5, 1)
-        .setValue(this.plugin.settings.chunkSize)
-        .setDynamicTooltip()
-        .onChange(async (value) => {
-          this.plugin.settings.chunkSize = value;
-          await this.plugin.saveSettings();
-        }));
+      .setDesc('Number of words displayed simultaneously (1-5)');
+    this.createSliderWithInput(
+      chunkSetting,
+      1, 5, 1,
+      this.plugin.settings.chunkSize,
+      '',
+      async (value) => {
+        this.plugin.settings.chunkSize = value;
+        await this.plugin.saveSettings();
+      }
+    );
 
-    new Setting(containerEl)
+    const fontSizeSetting = new Setting(containerEl)
       .setName('Font size')
-      .setDesc('Font size in pixels (20-120px)')
-      .addSlider(slider => slider
-        .setLimits(20, 120, 4)
-        .setValue(this.plugin.settings.fontSize)
-        .setDynamicTooltip()
-        .onChange(async (value) => {
-          this.plugin.settings.fontSize = value;
-          await this.plugin.saveSettings();
-        }));
+      .setDesc('Font size in pixels (20-120px)');
+    this.createSliderWithInput(
+      fontSizeSetting,
+      20, 120, 4,
+      this.plugin.settings.fontSize,
+      'px',
+      async (value) => {
+        this.plugin.settings.fontSize = value;
+        await this.plugin.saveSettings();
+      }
+    );
 
     new Setting(containerEl)
       .setName('Font family')
@@ -68,8 +142,18 @@ export class DashReaderSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
         }));
 
-    // Section: Speed Acceleration
-    containerEl.createEl('h3', { text: 'Speed Acceleration' });
+    // Section: Reading Enhancements
+    containerEl.createEl('h3', { text: 'Reading Enhancements' });
+
+    new Setting(containerEl)
+      .setName('Slow Start')
+      .setDesc('Gradually increase speed over first 5 words for comfortable start')
+      .addToggle(toggle => toggle
+        .setValue(this.plugin.settings.enableSlowStart)
+        .onChange(async (value) => {
+          this.plugin.settings.enableSlowStart = value;
+          await this.plugin.saveSettings();
+        }));
 
     new Setting(containerEl)
       .setName('Enable acceleration')
@@ -81,29 +165,33 @@ export class DashReaderSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
         }));
 
-    new Setting(containerEl)
+    const accelDurationSetting = new Setting(containerEl)
       .setName('Acceleration duration')
-      .setDesc('Duration to reach target speed (seconds)')
-      .addSlider(slider => slider
-        .setLimits(10, 120, 5)
-        .setValue(this.plugin.settings.accelerationDuration)
-        .setDynamicTooltip()
-        .onChange(async (value) => {
-          this.plugin.settings.accelerationDuration = value;
-          await this.plugin.saveSettings();
-        }));
+      .setDesc('Duration to reach target speed (seconds)');
+    this.createSliderWithInput(
+      accelDurationSetting,
+      10, 120, 5,
+      this.plugin.settings.accelerationDuration,
+      's',
+      async (value) => {
+        this.plugin.settings.accelerationDuration = value;
+        await this.plugin.saveSettings();
+      }
+    );
 
-    new Setting(containerEl)
+    const accelTargetSetting = new Setting(containerEl)
       .setName('Target WPM')
-      .setDesc('Target reading speed to reach (50-1000)')
-      .addSlider(slider => slider
-        .setLimits(50, 1000, 25)
-        .setValue(this.plugin.settings.accelerationTargetWpm)
-        .setDynamicTooltip()
-        .onChange(async (value) => {
-          this.plugin.settings.accelerationTargetWpm = value;
-          await this.plugin.saveSettings();
-        }));
+      .setDesc('Target reading speed to reach (50-5000)');
+    this.createSliderWithInput(
+      accelTargetSetting,
+      50, 5000, 25,
+      this.plugin.settings.accelerationTargetWpm,
+      '',
+      async (value) => {
+        this.plugin.settings.accelerationTargetWpm = value;
+        await this.plugin.saveSettings();
+      }
+    );
 
     // Section: Apparence
     containerEl.createEl('h3', { text: 'Appearance' });
@@ -154,17 +242,19 @@ export class DashReaderSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
         }));
 
-    new Setting(containerEl)
+    const contextSetting = new Setting(containerEl)
       .setName('Context words')
-      .setDesc('Number of context words to display (1-10)')
-      .addSlider(slider => slider
-        .setLimits(1, 10, 1)
-        .setValue(this.plugin.settings.contextWords)
-        .setDynamicTooltip()
-        .onChange(async (value) => {
-          this.plugin.settings.contextWords = value;
-          await this.plugin.saveSettings();
-        }));
+      .setDesc('Number of context words to display (1-10)');
+    this.createSliderWithInput(
+      contextSetting,
+      1, 10, 1,
+      this.plugin.settings.contextWords,
+      '',
+      async (value) => {
+        this.plugin.settings.contextWords = value;
+        await this.plugin.saveSettings();
+      }
+    );
 
     // Section: Micropause
     containerEl.createEl('h3', { text: 'Micropause' });
@@ -179,41 +269,117 @@ export class DashReaderSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
         }));
 
-    new Setting(containerEl)
-      .setName('Punctuation pause')
-      .setDesc('Pause multiplier for punctuation (1.0-3.0)')
-      .addSlider(slider => slider
-        .setLimits(1.0, 3.0, 0.1)
-        .setValue(this.plugin.settings.micropausePunctuation)
-        .setDynamicTooltip()
-        .onChange(async (value) => {
-          this.plugin.settings.micropausePunctuation = value;
-          await this.plugin.saveSettings();
-        }));
+    const punctuationSetting = new Setting(containerEl)
+      .setName('Sentence-ending punctuation pause')
+      .setDesc('Pause multiplier for .,!? (1.0-3.0)');
+    this.createSliderWithInput(
+      punctuationSetting,
+      1.0, 3.0, 0.1,
+      this.plugin.settings.micropausePunctuation,
+      'x',
+      async (value) => {
+        this.plugin.settings.micropausePunctuation = value;
+        await this.plugin.saveSettings();
+      }
+    );
 
-    new Setting(containerEl)
+    const otherPunctuationSetting = new Setting(containerEl)
+      .setName('Other punctuation pause')
+      .setDesc('Pause multiplier for ;:, (1.0-3.0)');
+    this.createSliderWithInput(
+      otherPunctuationSetting,
+      1.0, 3.0, 0.1,
+      this.plugin.settings.micropauseOtherPunctuation,
+      'x',
+      async (value) => {
+        this.plugin.settings.micropauseOtherPunctuation = value;
+        await this.plugin.saveSettings();
+      }
+    );
+
+    const longWordsSetting = new Setting(containerEl)
       .setName('Long words pause')
-      .setDesc('Pause multiplier for long words (1.0-2.0)')
-      .addSlider(slider => slider
-        .setLimits(1.0, 2.0, 0.1)
-        .setValue(this.plugin.settings.micropauseLongWords)
-        .setDynamicTooltip()
-        .onChange(async (value) => {
-          this.plugin.settings.micropauseLongWords = value;
-          await this.plugin.saveSettings();
-        }));
+      .setDesc('Pause multiplier for long words >8 chars (1.0-2.0)');
+    this.createSliderWithInput(
+      longWordsSetting,
+      1.0, 2.0, 0.1,
+      this.plugin.settings.micropauseLongWords,
+      'x',
+      async (value) => {
+        this.plugin.settings.micropauseLongWords = value;
+        await this.plugin.saveSettings();
+      }
+    );
 
-    new Setting(containerEl)
+    const paragraphSetting = new Setting(containerEl)
       .setName('Paragraph pause')
-      .setDesc('Pause multiplier for paragraph breaks (1.0-5.0)')
-      .addSlider(slider => slider
-        .setLimits(1.0, 5.0, 0.5)
-        .setValue(this.plugin.settings.micropauseParagraph)
-        .setDynamicTooltip()
-        .onChange(async (value) => {
-          this.plugin.settings.micropauseParagraph = value;
-          await this.plugin.saveSettings();
-        }));
+      .setDesc('Pause multiplier for paragraph breaks (1.0-5.0)');
+    this.createSliderWithInput(
+      paragraphSetting,
+      1.0, 5.0, 0.1,
+      this.plugin.settings.micropauseParagraph,
+      'x',
+      async (value) => {
+        this.plugin.settings.micropauseParagraph = value;
+        await this.plugin.saveSettings();
+      }
+    );
+
+    const numbersSetting = new Setting(containerEl)
+      .setName('Numbers pause')
+      .setDesc('Pause multiplier for numbers and dates (1.0-3.0)');
+    this.createSliderWithInput(
+      numbersSetting,
+      1.0, 3.0, 0.1,
+      this.plugin.settings.micropauseNumbers,
+      'x',
+      async (value) => {
+        this.plugin.settings.micropauseNumbers = value;
+        await this.plugin.saveSettings();
+      }
+    );
+
+    const sectionMarkersSetting = new Setting(containerEl)
+      .setName('Section markers pause')
+      .setDesc('Pause multiplier for 1., I., A., etc. (1.0-3.0)');
+    this.createSliderWithInput(
+      sectionMarkersSetting,
+      1.0, 3.0, 0.1,
+      this.plugin.settings.micropauseSectionMarkers,
+      'x',
+      async (value) => {
+        this.plugin.settings.micropauseSectionMarkers = value;
+        await this.plugin.saveSettings();
+      }
+    );
+
+    const listBulletsSetting = new Setting(containerEl)
+      .setName('List bullets pause')
+      .setDesc('Pause multiplier for -, *, +, • (1.0-3.0)');
+    this.createSliderWithInput(
+      listBulletsSetting,
+      1.0, 3.0, 0.1,
+      this.plugin.settings.micropauseListBullets,
+      'x',
+      async (value) => {
+        this.plugin.settings.micropauseListBullets = value;
+        await this.plugin.saveSettings();
+      }
+    );
+
+    const calloutsSetting = new Setting(containerEl)
+      .setName('Callouts pause')
+      .setDesc('Pause multiplier for Obsidian callouts (1.0-3.0)');
+    this.createSliderWithInput(
+      calloutsSetting,
+      1.0, 3.0, 0.1,
+      this.plugin.settings.micropauseCallouts,
+      'x',
+      async (value) => {
+        this.plugin.settings.micropauseCallouts = value;
+        await this.plugin.saveSettings();
+      }
+    );
 
     // Section: Auto-start
     containerEl.createEl('h3', { text: 'Auto-start' });
@@ -228,17 +394,19 @@ export class DashReaderSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
         }));
 
-    new Setting(containerEl)
+    const autoStartDelaySetting = new Setting(containerEl)
       .setName('Auto-start delay')
-      .setDesc('Delay before auto-start (seconds)')
-      .addSlider(slider => slider
-        .setLimits(1, 10, 1)
-        .setValue(this.plugin.settings.autoStartDelay)
-        .setDynamicTooltip()
-        .onChange(async (value) => {
-          this.plugin.settings.autoStartDelay = value;
-          await this.plugin.saveSettings();
-        }));
+      .setDesc('Delay before auto-start (seconds)');
+    this.createSliderWithInput(
+      autoStartDelaySetting,
+      1, 10, 1,
+      this.plugin.settings.autoStartDelay,
+      's',
+      async (value) => {
+        this.plugin.settings.autoStartDelay = value;
+        await this.plugin.saveSettings();
+      }
+    );
 
     // Section: Display
     containerEl.createEl('h3', { text: 'Display Options' });

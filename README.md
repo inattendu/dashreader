@@ -15,7 +15,7 @@ Instead of your eyes moving across lines of text, the text comes to you. Each wo
 ### Core Reading
 - Word-by-word display at screen center
 - Center character highlighting for optimal focus
-- Adjustable speed (50-1000 WPM)
+- Adjustable speed (50-5000 WPM) - supports ultra-fast reading speeds
 - Multi-word chunks (1-5 words at a time)
 - Context display (surrounding words preview)
 
@@ -46,8 +46,11 @@ Instead of your eyes moving across lines of text, the text comes to you. Each wo
   - Section counter: displays "Section 2/5" for H1 headings
   - Click any heading to jump to that position
   - Dropdown menus (▼) for navigating between headings of same level
+    - Shows numbered list of all headings at the same level
+    - Works smoothly during active reading (optimized updates)
+    - Centered display with overflow protection
   - Full heading titles displayed (no truncation, word-wrapping enabled)
-- Updates automatically as you read through sections
+- Updates automatically as you read through sections (only when context changes)
 - Displayed immediately on text load, not just during playback
 - Callouts displayed with their respective icons in breadcrumb
 - **New tab mode** - click ⤢ button to open in dedicated tab for fullscreen-like experience
@@ -103,12 +106,14 @@ Instead of your eyes moving across lines of text, the text comes to you. Each wo
 
 All settings available in `Settings → DashReader`:
 
-- **Reading Settings**: WPM speed, chunk size, font size and family
+**Enhanced UI** (v1.4.0): All numeric settings now display editable values next to sliders for precise control
+
+- **Reading Settings**: WPM speed (50-5000), chunk size, font size and family
 - **Slow Start** (v1.4.0): Enable progressive speed ramp over first 5 words for comfortable start
 - **Speed Acceleration**: Enable progressive acceleration, duration, target WPM
 - **Appearance**: Highlight color, text color, background color
 - **Context Display**: Show/hide context words, number of context words
-- **Micropause** (v1.4.0): Enable/disable, configurable multipliers for:
+- **Micropause** (v1.4.0): Enable/disable, all multipliers fully configurable:
   - Sentence punctuation (.,!?) - default 2.5x
   - Other punctuation (;:,) - default 1.5x
   - Numbers and dates - default 1.8x

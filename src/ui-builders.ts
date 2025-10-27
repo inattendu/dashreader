@@ -693,9 +693,9 @@ export function escapeHtml(text: string): string {
  */
 export function createWelcomeMessage(): string {
   return `
-    <div style="font-size: 20px; color: var(--text-muted); text-align: center;">
-      <div style="margin-bottom: 12px;">${ICONS.book} Select text to start reading</div>
-      <div style="font-size: 14px; opacity: 0.7;">or use Cmd+P → "Read selected text"</div>
+    <div class="dashreader-welcome-message">
+      <div class="dashreader-welcome-icon">${ICONS.book} Select text to start reading</div>
+      <div class="dashreader-welcome-instruction">or use Cmd+P → "Read selected text"</div>
     </div>
   `;
 }
@@ -721,15 +721,15 @@ export function createReadyMessage(
   sourceInfo: string = ''
 ): string {
   const startInfo = startIndex !== undefined && startIndex > 0
-    ? ` <span style="opacity: 0.6;">(starting at word ${startIndex + 1}/${totalWords})</span>`
+    ? ` <span class="dashreader-ready-start-info">(starting at word ${startIndex + 1}/${totalWords})</span>`
     : '';
 
   return `
-    <div style="font-size: 18px; color: var(--text-muted); text-align: center;">
+    <div class="dashreader-ready-message">
       ${sourceInfo}
       Ready to read ${wordsToRead} words${startInfo}<br/>
-      <span style="font-size: 14px; opacity: 0.7;">Estimated time: ~${durationText}</span><br/>
-      <span style="font-size: 14px; opacity: 0.7;">Press Shift+Space to start</span>
+      <span class="dashreader-ready-duration">Estimated time: ~${durationText}</span><br/>
+      <span class="dashreader-ready-duration">Press Shift+Space to start</span>
     </div>
   `;
 }

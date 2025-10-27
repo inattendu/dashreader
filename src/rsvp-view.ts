@@ -59,6 +59,10 @@ import { DashReaderSettings, WordChunk, HeadingContext, HeadingInfo } from './ty
 import { MarkdownParser } from './markdown-parser';
 import { ViewState } from './view-state';
 import { DOMRegistry } from './dom-registry';
+import { MenuBuilder } from './menu-builder';
+import { BreadcrumbManager } from './breadcrumb-manager';
+import { WordDisplay } from './word-display';
+import { HotkeyHandler } from './hotkey-handler';
 import {
   createButton,
   createNumberControl,
@@ -114,6 +118,15 @@ export class DashReaderView extends ItemView {
 
   /** Automatic text loading from editor */
   private autoLoadManager: AutoLoadManager;
+
+  /** Breadcrumb navigation manager */
+  private breadcrumbManager: BreadcrumbManager;
+
+  /** Word display manager */
+  private wordDisplay: WordDisplay;
+
+  /** Hotkey handler */
+  private hotkeyHandler: HotkeyHandler;
 
   // ──────────────────────────────────────────────────────────────────────
   // DOM Element References
@@ -223,6 +236,19 @@ export class DashReaderView extends ItemView {
   async onOpen(): Promise<void> {
     this.mainContainerEl = this.contentEl.createDiv({ cls: CSS_CLASSES.container });
     this.buildUI();
+
+    // Initialize modules after UI is built
+    this.breadcrumbManager = new BreadcrumbManager(this.breadcrumbEl, this.engine);
+    this.wordDisplay = new WordDisplay(this.wordEl, this.settings);
+    this.hotkeyHandler = new HotkeyHandler(this.settings, {
+      onTogglePlay: () => this.togglePlay(),
+      onRewind: () => this.engine.rewind(),
+      onForward: () => this.engine.forward(),
+      onIncrementWpm: () => this.changeValue('wpm', 10),
+      onDecrementWpm: () => this.changeValue('wpm', -10),
+      onQuit: () => this.engine.stop()
+    });
+
     this.setupHotkeys();
 
     // Setup auto-load when layout is ready
@@ -624,7 +650,6 @@ export class DashReaderView extends ItemView {
         if (!file) return;
 
         this.autoLoadManager.resetForNewFile(file.path);
-        console.log('DashReader: File opened:', file.path);
         this.autoLoadManager.loadFromEditor(TIMING.autoLoadDelay);
       })
     );
@@ -633,8 +658,6 @@ export class DashReaderView extends ItemView {
     this.registerEvent(
       this.app.workspace.on('active-leaf-change', () => {
         if (!this.mainContainerEl || !this.mainContainerEl.isShown()) return;
-
-        console.log('DashReader: Active leaf changed');
 
         const currentFile = this.app.workspace.getActiveFile();
         if (currentFile && this.autoLoadManager.hasFileChanged(currentFile.path)) {
@@ -646,7 +669,6 @@ export class DashReaderView extends ItemView {
 
     // Mouse events for cursor tracking
     this.registerDomEvent(document, 'mouseup', () => {
-      console.log('DashReader: Mouse click detected');
       setTimeout(() => {
         if (this.mainContainerEl.isShown()) {
           this.autoLoadManager.checkSelectionOrCursor();
@@ -657,11 +679,6 @@ export class DashReaderView extends ItemView {
     // Keyboard events for navigation and selection
     this.registerDomEvent(document, 'keyup', (evt: KeyboardEvent) => {
       if (isNavigationKey(evt) || isSelectionKey(evt)) {
-        console.log('DashReader: Navigation key detected:', evt.key, 'with modifiers:', {
-          shift: evt.shiftKey,
-          ctrl: evt.ctrlKey,
-          meta: evt.metaKey
-        });
         setTimeout(() => {
           if (this.mainContainerEl.isShown()) {
             this.autoLoadManager.checkSelectionOrCursor();
@@ -669,8 +686,6 @@ export class DashReaderView extends ItemView {
         }, TIMING.autoLoadDelayVeryShort);
       }
     });
-
-    console.log('DashReader: Auto-load setup complete');
   }
 
   // ============================================================================
@@ -699,7 +714,7 @@ export class DashReaderView extends ItemView {
   private handleKeyPress(e: KeyboardEvent): void {
     if (!this.mainContainerEl.isShown()) return;
 
-    // Quick toggles (when not playing)
+    // Quick toggles for panels (when not playing)
     if (e.key === 'c' && !this.engine.getIsPlaying()) {
       e.preventDefault();
       this.togglePanel('controls');
@@ -712,39 +727,8 @@ export class DashReaderView extends ItemView {
       return;
     }
 
-    const keyCode = e.code || e.key;
-
-    // Play/Pause with Shift+Space only
-    if (keyCode === 'Space' && e.shiftKey) {
-      e.preventDefault();
-      console.log('DashReader: Shift+Space pressed, toggling play');
-      this.togglePlay();
-      return;
-    }
-
-    // Other hotkeys
-    switch (keyCode) {
-      case this.settings.hotkeyRewind:
-        e.preventDefault();
-        this.engine.rewind();
-        break;
-      case this.settings.hotkeyForward:
-        e.preventDefault();
-        this.engine.forward();
-        break;
-      case this.settings.hotkeyIncrementWpm:
-        e.preventDefault();
-        this.changeValue('wpm', INCREMENTS.wpm);
-        break;
-      case this.settings.hotkeyDecrementWpm:
-        e.preventDefault();
-        this.changeValue('wpm', -INCREMENTS.wpm);
-        break;
-      case this.settings.hotkeyQuit:
-        e.preventDefault();
-        this.engine.stop();
-        break;
-    }
+    // Delegate hotkey handling to HotkeyHandler
+    this.hotkeyHandler.handleKeyPress(e);
   }
 
   /**
@@ -789,19 +773,20 @@ export class DashReaderView extends ItemView {
       headingLevel = parseInt(headingMatch[1]);
       displayText = chunk.text.replace(/^\[H\d\]/, '');
       showSeparator = true;
-      console.log('DashReader: Heading detected - Level', headingLevel, 'Text:', displayText);
     } else if (calloutMatch) {
       calloutType = calloutMatch[1];
       displayText = chunk.text.replace(/^\[CALLOUT:[\w-]+\]/, '');
       showSeparator = true;
-      console.log('DashReader: Callout detected - Type', calloutType, 'Text:', displayText);
     }
 
-    this.displayWordWithHeading(displayText, headingLevel, showSeparator, calloutType);
+    // Delegate word display to WordDisplay module
+    this.wordDisplay.displayWord(displayText, headingLevel, showSeparator, calloutType);
 
-    // Update breadcrumb navigation
-    if (chunk.headingContext) {
-      this.updateBreadcrumb(chunk.headingContext);
+    // Update breadcrumb navigation (only if context changed)
+    if (chunk.headingContext && this.breadcrumbManager) {
+      if (this.breadcrumbManager.hasHeadingContextChanged(chunk.headingContext)) {
+        this.breadcrumbManager.updateBreadcrumb(chunk.headingContext);
+      }
     }
 
     // Update context
@@ -848,14 +833,13 @@ export class DashReaderView extends ItemView {
     // Calculate font size based on heading level or callout
     let fontSizeMultiplier = 1.0;
     let fontWeight = 'normal';
-    let prefix = '';
+    let iconPrefix = '';
 
     if (calloutType) {
       // Callouts: slightly larger font, with icon prefix
       fontSizeMultiplier = 1.2;
       fontWeight = 'bold';
-      const icon = calloutIcons[calloutType.toLowerCase()] || '📌';
-      prefix = `<span style="margin-right: 8px; opacity: 0.8;">${icon}</span>`;
+      iconPrefix = calloutIcons[calloutType.toLowerCase()] || '📌';
     } else if (headingLevel > 0) {
       // Headings: size based on level
       const multipliers = [
@@ -874,16 +858,28 @@ export class DashReaderView extends ItemView {
     const adjustedFontSize = this.settings.fontSize * fontSizeMultiplier;
     const processedWord = this.processWord(word);
 
-    const separator = showSeparator
-      ? `<div style="width: 60%; height: 2px; background: var(--text-muted); opacity: 0.4; margin: 0 auto 20px auto;"></div>`
-      : '';
+    // Clear and rebuild using DOM API (not innerHTML)
+    this.wordEl.empty();
 
-    this.wordEl.innerHTML = `
-      ${separator}
-      <div style="font-size: ${adjustedFontSize}px; transition: font-size 0.3s ease; font-weight: ${fontWeight};">
-        ${prefix}${processedWord}
-      </div>
-    `;
+    // Add separator if needed
+    if (showSeparator) {
+      this.wordEl.createDiv({ cls: 'dashreader-heading-separator' });
+    }
+
+    // Create word container
+    const wordContainer = this.wordEl.createDiv({ cls: 'dashreader-word-with-heading' });
+    wordContainer.style.fontSize = `${adjustedFontSize}px`;
+    wordContainer.style.fontWeight = fontWeight;
+
+    // Add icon prefix if callout
+    if (iconPrefix) {
+      const iconSpan = wordContainer.createSpan({ text: iconPrefix });
+      iconSpan.style.marginRight = '8px';
+      iconSpan.style.opacity = '0.8';
+    }
+
+    // Add processed word (may contain HTML for highlighting)
+    wordContainer.innerHTML = processedWord;
   }
 
   /**
@@ -909,308 +905,6 @@ export class DashReaderView extends ItemView {
     }
 
     return result;
-  }
-
-  /**
-   * Updates the breadcrumb navigation bar with current heading context
-   * Shows hierarchical path (H1 > H2 > H3) and makes it clickable for navigation
-   *
-   * @param context - Current heading context from engine
-   */
-  private updateBreadcrumb(context: HeadingContext): void {
-    if (!context || context.breadcrumb.length === 0) {
-      // No headings, hide breadcrumb
-      this.breadcrumbEl.style.display = 'none';
-      return;
-    }
-
-    // Show breadcrumb
-    this.breadcrumbEl.style.display = 'flex';
-    this.breadcrumbEl.style.flexDirection = 'column';
-    this.breadcrumbEl.style.gap = '8px';
-    this.breadcrumbEl.empty();
-
-    // === PROGRESS INDICATORS CONTAINER ===
-    const progressContainer = this.breadcrumbEl.createDiv({
-      cls: 'dashreader-breadcrumb-progress'
-    });
-    progressContainer.style.display = 'flex';
-    progressContainer.style.alignItems = 'center';
-    progressContainer.style.gap = '12px';
-    progressContainer.style.fontSize = '12px';
-    progressContainer.style.color = 'var(--text-muted)';
-    progressContainer.style.fontWeight = 'bold';
-
-    // Calculate section progress (based on H1 headings)
-    const allHeadings = this.engine.getHeadings();
-    const allH1s = allHeadings.filter(h => h.level === 1);
-    const currentIndex = this.engine.getCurrentIndex();
-
-    // Find current section (which H1 are we in?)
-    let currentSectionIndex = 0;
-    for (let i = 0; i < allH1s.length; i++) {
-      if (allH1s[i].wordIndex <= currentIndex) {
-        currentSectionIndex = i + 1;
-      } else {
-        break;
-      }
-    }
-
-    // Get progress percentage
-    const totalWords = this.engine.getTotalWords();
-    const progressPercent = totalWords > 0 ? (currentIndex / totalWords) * 100 : 0;
-
-    // Section counter (if we have H1s)
-    if (allH1s.length > 0 && currentSectionIndex > 0) {
-      const sectionCounter = progressContainer.createSpan({
-        text: `Section ${currentSectionIndex}/${allH1s.length}`,
-        cls: 'dashreader-section-counter'
-      });
-      sectionCounter.style.opacity = '0.8';
-    }
-
-    // === BREADCRUMB PATH CONTAINER ===
-    const breadcrumbPath = this.breadcrumbEl.createDiv({
-      cls: 'dashreader-breadcrumb-path'
-    });
-    breadcrumbPath.style.display = 'flex';
-    breadcrumbPath.style.flexWrap = 'wrap';
-    breadcrumbPath.style.gap = '4px';
-    breadcrumbPath.style.alignItems = 'center';
-
-    // Callout icon mapping (same as displayWordWithHeading)
-    const calloutIcons: Record<string, string> = {
-      note: '📝',
-      abstract: '📄',
-      info: 'ℹ️',
-      tip: '💡',
-      success: '✅',
-      question: '❓',
-      warning: '⚠️',
-      failure: '❌',
-      danger: '⚡',
-      bug: '🐛',
-      example: '📋',
-      quote: '💬'
-    };
-
-    // Build breadcrumb items
-    context.breadcrumb.forEach((heading, index) => {
-      // Add separator if not first item
-      if (index > 0) {
-        const separator = breadcrumbPath.createSpan({
-          cls: 'dashreader-breadcrumb-separator',
-          text: ' › '
-        });
-        separator.style.opacity = '0.5';
-        separator.style.margin = '0 4px';
-        separator.style.flexShrink = '0';
-      }
-
-      // Determine display text with icon for callouts
-      let displayText = heading.text;
-      if (heading.calloutType) {
-        const icon = calloutIcons[heading.calloutType.toLowerCase()] || '📌';
-        displayText = `${icon} ${heading.text}`;
-      }
-
-      // Create breadcrumb item container (text + dropdown button)
-      const itemContainer = breadcrumbPath.createSpan({
-        cls: 'dashreader-breadcrumb-item-container'
-      });
-      itemContainer.style.display = 'inline-flex';
-      itemContainer.style.alignItems = 'center';
-      itemContainer.style.gap = '4px';
-
-      // Create breadcrumb item text
-      const item = itemContainer.createSpan({
-        cls: 'dashreader-breadcrumb-item',
-        text: displayText
-      });
-
-      // Style the item - allow full text display with wrapping
-      const isLast = index === context.breadcrumb.length - 1;
-      item.style.cursor = 'pointer';
-      item.style.opacity = isLast ? '1' : '0.7';
-      item.style.fontWeight = isLast ? 'bold' : 'normal';
-      item.style.whiteSpace = 'normal'; // Allow wrapping for long titles
-      item.style.wordBreak = 'break-word';
-
-      // Font size: larger for higher-level headings, medium for callouts
-      if (heading.calloutType) {
-        item.style.fontSize = '14px'; // Callouts: consistent size
-      } else {
-        item.style.fontSize = `${12 + (2 * (6 - heading.level))}px`; // Headings: size by level
-      }
-
-      // Add hover effect
-      item.addEventListener('mouseenter', () => {
-        item.style.opacity = '1';
-        item.style.textDecoration = 'underline';
-      });
-      item.addEventListener('mouseleave', () => {
-        item.style.opacity = isLast ? '1' : '0.7';
-        item.style.textDecoration = 'none';
-      });
-
-      // Make it clickable to navigate
-      item.addEventListener('click', () => {
-        this.navigateToHeading(heading.wordIndex);
-      });
-
-      // Add dropdown button for navigation
-      const dropdown = itemContainer.createSpan({
-        cls: 'dashreader-breadcrumb-dropdown',
-        text: '▼'
-      });
-      dropdown.style.cursor = 'pointer';
-      dropdown.style.opacity = '0.4';
-      dropdown.style.fontSize = '10px';
-      dropdown.style.padding = '2px 4px';
-      dropdown.style.borderRadius = '3px';
-      dropdown.style.transition = 'all 0.2s';
-
-      dropdown.addEventListener('mouseenter', () => {
-        dropdown.style.opacity = '1';
-        dropdown.style.backgroundColor = 'var(--background-modifier-hover)';
-      });
-      dropdown.addEventListener('mouseleave', () => {
-        dropdown.style.opacity = '0.4';
-        dropdown.style.backgroundColor = 'transparent';
-      });
-
-      dropdown.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this.showHeadingMenu(heading, dropdown);
-      });
-    });
-  }
-
-  /**
-   * Shows a dropdown menu with all headings of the same level for navigation
-   * @param currentHeading - The heading that was clicked
-   * @param anchorEl - The element to position the menu relative to
-   */
-  private showHeadingMenu(currentHeading: HeadingInfo, anchorEl: HTMLElement): void {
-    // Get all headings of the same level
-    const allHeadings = this.engine.getHeadings();
-    const sameLevelHeadings = allHeadings.filter(h => h.level === currentHeading.level);
-
-    if (sameLevelHeadings.length <= 1) {
-      // No other headings of this level, nothing to navigate to
-      return;
-    }
-
-    // Create menu
-    const menu = this.contentEl.createDiv({
-      cls: 'dashreader-heading-menu'
-    });
-
-    // Position it near the anchor element
-    const rect = anchorEl.getBoundingClientRect();
-    menu.style.position = 'fixed';
-    menu.style.top = `${rect.bottom + 5}px`;
-    menu.style.left = `${rect.left}px`;
-    menu.style.zIndex = '1000';
-    menu.style.backgroundColor = 'var(--background-primary)';
-    menu.style.border = '1px solid var(--background-modifier-border)';
-    menu.style.borderRadius = '4px';
-    menu.style.padding = '4px';
-    menu.style.maxHeight = '300px';
-    menu.style.overflowY = 'auto';
-    menu.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.15)';
-    menu.style.minWidth = '200px';
-
-    // Add menu items
-    sameLevelHeadings.forEach((heading, index) => {
-      const isCurrent = heading.wordIndex === currentHeading.wordIndex;
-
-      const menuItem = menu.createDiv({
-        cls: 'dashreader-heading-menu-item'
-      });
-      menuItem.style.padding = '6px 12px';
-      menuItem.style.cursor = 'pointer';
-      menuItem.style.fontSize = '13px';
-      menuItem.style.borderRadius = '3px';
-      menuItem.style.display = 'flex';
-      menuItem.style.alignItems = 'center';
-      menuItem.style.gap = '8px';
-
-      if (isCurrent) {
-        menuItem.style.backgroundColor = 'var(--background-modifier-hover)';
-        menuItem.style.fontWeight = 'bold';
-      }
-
-      // Add number
-      const number = menuItem.createSpan({
-        text: `${index + 1}.`
-      });
-      number.style.opacity = '0.6';
-      number.style.minWidth = '25px';
-
-      // Add heading text
-      const text = menuItem.createSpan({
-        text: heading.text
-      });
-      text.style.flex = '1';
-
-      // Hover effect
-      if (!isCurrent) {
-        menuItem.addEventListener('mouseenter', () => {
-          menuItem.style.backgroundColor = 'var(--background-modifier-hover)';
-        });
-        menuItem.addEventListener('mouseleave', () => {
-          menuItem.style.backgroundColor = 'transparent';
-        });
-      }
-
-      // Click to navigate
-      menuItem.addEventListener('click', () => {
-        this.navigateToHeading(heading.wordIndex);
-        menu.remove();
-      });
-    });
-
-    // Close menu when clicking outside
-    const closeMenu = (e: MouseEvent) => {
-      if (!menu.contains(e.target as Node)) {
-        menu.remove();
-        document.removeEventListener('click', closeMenu);
-      }
-    };
-
-    // Delay adding the listener to avoid immediate close from the current click
-    setTimeout(() => {
-      document.addEventListener('click', closeMenu);
-    }, 10);
-  }
-
-  /**
-   * Navigates to a specific heading by word index
-   * Pauses playback, jumps to the heading position, and resumes if it was playing
-   *
-   * @param wordIndex - Word index to navigate to
-   */
-  private navigateToHeading(wordIndex: number): void {
-    const wasPlaying = this.engine.getIsPlaying();
-
-    if (wasPlaying) {
-      this.engine.pause();
-    }
-
-    // Use the engine's jump functionality (via rewind/forward)
-    const currentIndex = this.engine.getCurrentIndex();
-    const delta = wordIndex - currentIndex;
-
-    if (delta < 0) {
-      this.engine.rewind(Math.abs(delta));
-    } else if (delta > 0) {
-      this.engine.forward(delta);
-    }
-
-    if (wasPlaying) {
-      this.engine.play();
-    }
   }
 
   /**
@@ -1258,26 +952,21 @@ export class DashReaderView extends ItemView {
    * @param source - Optional source information (filename, line, cursor position)
    */
   public loadText(text: string, source?: { fileName?: string; lineNumber?: number; cursorPosition?: number }): void {
-    console.log('DashReader: loadText called with source:', source);
-
     // Stop current reading if playing
     if (this.engine.getIsPlaying()) {
       this.engine.stop();
       updatePlayPauseButtons(this.dom, false);
-      console.log('DashReader: Stopped current reading');
     }
 
+    // Reset breadcrumb context for new text
+    this.breadcrumbManager.reset();
+
     // Parse markdown FIRST (remove syntax, keep content)
-    console.log('DashReader: Parsing markdown, original length:', text.length);
     const plainText = MarkdownParser.parseToPlainText(text);
-    console.log('DashReader: After parsing, length:', plainText.length);
-    console.log('DashReader: First 100 chars:', plainText.substring(0, 100));
 
     // Calculate word index from cursor position
     let wordIndexFromCursor: number | undefined;
     if (source?.cursorPosition !== undefined) {
-      console.log('DashReader: Cursor position detected:', source.cursorPosition);
-
       // Parse text up to cursor position
       const textUpToCursor = text.substring(0, source.cursorPosition);
       const parsedUpToCursor = MarkdownParser.parseToPlainText(textUpToCursor);
@@ -1285,18 +974,10 @@ export class DashReaderView extends ItemView {
       // Count words in parsed text (not raw markdown)
       const wordsBeforeCursor = parsedUpToCursor.trim().split(/\s+/).filter(w => w.length > 0);
       wordIndexFromCursor = wordsBeforeCursor.length;
-
-      console.log('DashReader: Original text up to cursor:', textUpToCursor.length, 'chars');
-      console.log('DashReader: Parsed text up to cursor:', parsedUpToCursor.length, 'chars');
-      console.log('DashReader: Words before cursor (after parsing):', wordsBeforeCursor.slice(0, 10), '...');
-      console.log('DashReader: Cursor at character', source.cursorPosition, '→ word index', wordIndexFromCursor, '(in parsed text)');
-    } else {
-      console.log('DashReader: No cursor position provided');
     }
 
     // Verify text length
     if (!plainText || plainText.trim().length < TEXT_LIMITS.minParsedLength) {
-      console.log('DashReader: Text too short after parsing');
       return;
     }
 
@@ -1317,7 +998,7 @@ export class DashReaderView extends ItemView {
     if (source?.fileName) {
       const escapedFileName = escapeHtml(source.fileName);
       const lineInfo = source.lineNumber ? ` (line ${source.lineNumber})` : '';
-      sourceInfo = `<div style="font-size: 14px; opacity: 0.6; margin-bottom: 8px;">
+      sourceInfo = `<div class="dashreader-ready-source">
         ${ICONS.file} ${escapedFileName}${lineInfo}
       </div>`;
     }
@@ -1337,8 +1018,6 @@ export class DashReaderView extends ItemView {
 
     // Display ready message
     this.wordEl.innerHTML = createReadyMessage(remainingWords, totalWords, wordIndexFromCursor, durationText, sourceInfo);
-
-    console.log('DashReader: Words to read:', remainingWords, 'out of', totalWords);
 
     // Display initial breadcrumb (before starting reading)
     const allHeadings = this.engine.getHeadings();
@@ -1367,7 +1046,9 @@ export class DashReaderView extends ItemView {
           current: breadcrumb[breadcrumb.length - 1] || null
         };
 
-        this.updateBreadcrumb(initialContext);
+        if (this.breadcrumbManager) {
+          this.breadcrumbManager.updateBreadcrumb(initialContext);
+        }
       }
     }
 

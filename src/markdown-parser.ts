@@ -9,9 +9,14 @@ export class MarkdownParser {
     // 1. Enlever le frontmatter YAML EN PREMIER (souvent au début)
     text = text.replace(/^---[\s\S]*?---\n?/m, '');
 
-    // 2. Extraire le contenu des blocs de code (garder le code, enlever les ```)
-    // Gère: ```python\ncode``` ou ```\ncode``` ou ``` code ```
-    text = text.replace(/```[\w-]*\n?([\s\S]*?)```/g, '$1');
+    // 2. Protéger le contenu des blocs de code avec des marqueurs temporaires
+    // Cela empêche les commentaires # dans le code d'être traités comme des headings
+    const codeBlocks: string[] = [];
+    text = text.replace(/```[\w-]*\n?([\s\S]*?)```/g, (match, code) => {
+      const index = codeBlocks.length;
+      codeBlocks.push(code);
+      return `___CODE_BLOCK_${index}___`;
+    });
 
     // 3. Enlever les inline code mais garder le contenu
     text = text.replace(/`([^`]+)`/g, '$1');
@@ -92,7 +97,12 @@ export class MarkdownParser {
     text = text.replace(/^[ \t]+/gm, '');
     text = text.replace(/[ \t]+$/gm, '');
 
-    // 23. Trim final
+    // 23. Restaurer le contenu des blocs de code
+    text = text.replace(/___CODE_BLOCK_(\d+)___/g, (match, index) => {
+      return codeBlocks[parseInt(index)] || '';
+    });
+
+    // 24. Trim final
     text = text.trim();
 
     return text;

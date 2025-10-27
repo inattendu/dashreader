@@ -50,26 +50,20 @@ var RSVPEngine = class {
     this.onComplete = onComplete;
   }
   setText(text, startPosition, startWordIndex) {
-    console.log("DashReader Engine: setText called with startPosition:", startPosition, "startWordIndex:", startWordIndex);
     const cleaned = text.replace(/\n+/g, " \xA7\xA7LINEBREAK\xA7\xA7 ").replace(/[ \t]+/g, " ").trim();
     this.words = cleaned.split(/\s+/);
-    console.log("DashReader Engine: Total words after split:", this.words.length);
     this.extractHeadings();
-    console.log("DashReader Engine: Extracted", this.headings.length, "headings");
     this.words = this.words.map(
       (word) => word === "\xA7\xA7LINEBREAK\xA7\xA7" ? "\n" : word
     );
     if (startWordIndex !== void 0) {
       this.currentIndex = Math.max(0, Math.min(startWordIndex, this.words.length - 1));
-      console.log("DashReader Engine: Starting at word index", this.currentIndex, "/", this.words.length, "(from startWordIndex)");
     } else if (startPosition !== void 0 && startPosition > 0) {
       const textUpToCursor = text.substring(0, startPosition);
       const wordsBeforeCursor = textUpToCursor.trim().split(/\s+/).length;
       this.currentIndex = Math.min(wordsBeforeCursor, this.words.length - 1);
-      console.log("DashReader Engine: Starting at word index", this.currentIndex, "/", this.words.length, "(from startPosition)");
     } else {
       this.currentIndex = 0;
-      console.log("DashReader Engine: Starting at beginning (no start position)");
     }
   }
   play() {
@@ -449,7 +443,12 @@ var MarkdownParser = class {
   static parseToPlainText(markdown) {
     let text = markdown;
     text = text.replace(/^---[\s\S]*?---\n?/m, "");
-    text = text.replace(/```[\w-]*\n?([\s\S]*?)```/g, "$1");
+    const codeBlocks = [];
+    text = text.replace(/```[\w-]*\n?([\s\S]*?)```/g, (match, code) => {
+      const index = codeBlocks.length;
+      codeBlocks.push(code);
+      return `___CODE_BLOCK_${index}___`;
+    });
     text = text.replace(/`([^`]+)`/g, "$1");
     text = text.replace(/!\[([^\]]*)\]\([^\)]+\)/g, "");
     text = text.replace(/\[([^\]]+)\]\([^\)]+\)/g, "$1");
@@ -485,6 +484,9 @@ var MarkdownParser = class {
     text = text.replace(/\n{3,}/g, "\n\n");
     text = text.replace(/^[ \t]+/gm, "");
     text = text.replace(/[ \t]+$/gm, "");
+    text = text.replace(/___CODE_BLOCK_(\d+)___/g, (match, index) => {
+      return codeBlocks[parseInt(index)] || "";
+    });
     text = text.trim();
     return text;
   }
@@ -1152,6 +1154,350 @@ var DOMRegistry = class {
   }
 };
 
+// src/menu-builder.ts
+var MenuBuilder = class {
+  /**
+   * Creates a dropdown menu near an anchor element
+   *
+   * @param options - Menu configuration
+   * @returns The created menu element
+   */
+  static createMenu(options) {
+    const {
+      anchorEl,
+      cssClass,
+      title,
+      items,
+      onItemClick,
+      showLevel = false,
+      indentByLevel = false
+    } = options;
+    const menu = document.body.createDiv({ cls: cssClass });
+    const anchorRect = anchorEl.getBoundingClientRect();
+    menu.style.top = `${anchorRect.bottom + 5}px`;
+    if (cssClass.includes("heading-menu")) {
+      const menuWidth = 300;
+      const centerLeft = anchorRect.left + (anchorRect.width - menuWidth) / 2;
+      const viewportWidth = window.innerWidth;
+      const finalLeft = Math.max(10, Math.min(centerLeft, viewportWidth - menuWidth - 10));
+      menu.style.left = `${finalLeft}px`;
+    } else {
+      menu.style.left = `${anchorRect.left}px`;
+    }
+    if (title) {
+      menu.createDiv({
+        text: title,
+        cls: "dashreader-menu-title"
+      });
+    }
+    items.forEach((item, index) => {
+      const menuItem = menu.createDiv({
+        cls: item.isCurrent ? "dashreader-menu-item dashreader-menu-item-current" : "dashreader-menu-item"
+      });
+      if (indentByLevel && item.level) {
+        const indent = (item.level - 1) * 16;
+        menuItem.style.paddingLeft = item.isCurrent ? `${8 + indent - 3}px` : `${8 + indent}px`;
+      }
+      if (showLevel && item.level) {
+        menuItem.createSpan({
+          text: `H${item.level}`,
+          cls: "dashreader-outline-level"
+        });
+      } else if (!showLevel) {
+        menuItem.createSpan({
+          text: `${index + 1}.`,
+          cls: "dashreader-outline-level"
+        });
+      }
+      menuItem.createSpan({
+        text: item.text,
+        cls: "dashreader-outline-text"
+      });
+      menuItem.addEventListener("click", () => {
+        onItemClick(item.wordIndex);
+        menu.remove();
+      });
+    });
+    const closeMenu = (e) => {
+      if (!menu.contains(e.target)) {
+        menu.remove();
+        document.removeEventListener("click", closeMenu);
+      }
+    };
+    setTimeout(() => {
+      document.addEventListener("click", closeMenu);
+    }, 10);
+    return menu;
+  }
+  /**
+   * Scrolls to the current item in the menu (for outline menu)
+   *
+   * @param menu - The menu element
+   */
+  static scrollToCurrentItem(menu) {
+    setTimeout(() => {
+      const currentItem = menu.querySelector(".dashreader-menu-item-current");
+      if (currentItem) {
+        currentItem.scrollIntoView({ block: "center" });
+      }
+    }, 10);
+  }
+};
+
+// src/breadcrumb-manager.ts
+var BreadcrumbManager = class {
+  constructor(breadcrumbEl, engine) {
+    this.lastHeadingContext = null;
+    /**
+     * Callout icon mapping (consistent with WordDisplay)
+     */
+    this.calloutIcons = {
+      note: "\u{1F4DD}",
+      abstract: "\u{1F4C4}",
+      info: "\u2139\uFE0F",
+      tip: "\u{1F4A1}",
+      success: "\u2705",
+      question: "\u2753",
+      warning: "\u26A0\uFE0F",
+      failure: "\u274C",
+      danger: "\u26A1",
+      bug: "\u{1F41B}",
+      example: "\u{1F4CB}",
+      quote: "\u{1F4AC}"
+    };
+    this.breadcrumbEl = breadcrumbEl;
+    this.engine = engine;
+  }
+  /**
+   * Updates the breadcrumb navigation bar with current heading context
+   * Shows hierarchical path (H1 > H2 > H3) and makes it clickable for navigation
+   *
+   * @param context - Current heading context from engine
+   */
+  updateBreadcrumb(context) {
+    if (!context || context.breadcrumb.length === 0) {
+      this.breadcrumbEl.style.display = "none";
+      return;
+    }
+    this.breadcrumbEl.style.display = "flex";
+    this.breadcrumbEl.style.flexDirection = "column";
+    this.breadcrumbEl.style.gap = "8px";
+    this.breadcrumbEl.empty();
+    const breadcrumbHeader = this.breadcrumbEl.createDiv({
+      cls: "dashreader-breadcrumb-header"
+    });
+    const outlineButton = breadcrumbHeader.createSpan({
+      text: "\u2261",
+      cls: "dashreader-outline-button"
+    });
+    outlineButton.addEventListener("click", () => {
+      this.showOutlineMenu(outlineButton);
+    });
+    const breadcrumbPath = this.breadcrumbEl.createDiv({
+      cls: "dashreader-breadcrumb-path"
+    });
+    context.breadcrumb.forEach((heading, index) => {
+      if (index > 0) {
+        breadcrumbPath.createSpan({
+          text: "\u203A",
+          cls: "dashreader-breadcrumb-separator"
+        });
+      }
+      const itemContainer = breadcrumbPath.createSpan({
+        cls: "dashreader-breadcrumb-item"
+      });
+      itemContainer.style.cursor = "pointer";
+      const calloutMatch = heading.text.match(/^\[CALLOUT:([\w-]+)\]/);
+      let displayText = heading.text;
+      let icon = "";
+      if (calloutMatch) {
+        const calloutType = calloutMatch[1];
+        icon = this.calloutIcons[calloutType.toLowerCase()] || "\u{1F4CC}";
+        displayText = heading.text.replace(/^\[CALLOUT:[\w-]+\]/, "").trim();
+      }
+      if (icon) {
+        const iconSpan = itemContainer.createSpan({ text: icon });
+        iconSpan.style.marginRight = "4px";
+      }
+      itemContainer.createSpan({ text: displayText });
+      const dropdown = itemContainer.createSpan({
+        text: "\u25BC",
+        cls: "dashreader-breadcrumb-dropdown"
+      });
+      itemContainer.addEventListener("click", (e) => {
+        if (e.target !== dropdown) {
+          this.navigateToHeading(heading.wordIndex);
+        }
+      });
+      dropdown.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.showHeadingMenu(heading, itemContainer);
+      });
+    });
+    this.lastHeadingContext = context;
+  }
+  /**
+   * Closes all open menus (heading and outline menus)
+   * Called before opening a new menu to ensure only one menu is visible
+   */
+  closeAllMenus() {
+    document.querySelectorAll(".dashreader-heading-menu").forEach((menu) => {
+      menu.remove();
+    });
+    document.querySelectorAll(".dashreader-outline-menu").forEach((menu) => {
+      menu.remove();
+    });
+  }
+  /**
+   * Checks if heading context has changed (to avoid unnecessary updates)
+   *
+   * @param newContext - New heading context to check
+   * @returns True if context has changed, false otherwise
+   */
+  hasHeadingContextChanged(newContext) {
+    if (!this.lastHeadingContext)
+      return true;
+    if (this.lastHeadingContext.breadcrumb.length !== newContext.breadcrumb.length) {
+      return true;
+    }
+    for (let i = 0; i < newContext.breadcrumb.length; i++) {
+      if (this.lastHeadingContext.breadcrumb[i].wordIndex !== newContext.breadcrumb[i].wordIndex) {
+        return true;
+      }
+    }
+    return false;
+  }
+  /**
+   * Shows dropdown menu with sibling headings (same level under same parent)
+   *
+   * @param currentHeading - The heading whose siblings to show
+   * @param anchorEl - The element to position the menu relative to
+   */
+  showHeadingMenu(currentHeading, anchorEl) {
+    this.closeAllMenus();
+    const allHeadings = this.engine.getHeadings();
+    let parentHeading = null;
+    let currentIndex = -1;
+    for (let i = 0; i < allHeadings.length; i++) {
+      if (allHeadings[i].wordIndex === currentHeading.wordIndex) {
+        currentIndex = i;
+        break;
+      }
+    }
+    if (currentIndex > 0) {
+      for (let i = currentIndex - 1; i >= 0; i--) {
+        if (allHeadings[i].level < currentHeading.level) {
+          parentHeading = allHeadings[i];
+          break;
+        }
+      }
+    }
+    const siblings = [];
+    for (let i = 0; i < allHeadings.length; i++) {
+      const heading = allHeadings[i];
+      if (heading.level !== currentHeading.level) {
+        continue;
+      }
+      if (parentHeading && heading.wordIndex <= parentHeading.wordIndex) {
+        continue;
+      }
+      let isUnderSameParent = true;
+      if (parentHeading) {
+        for (let j = 0; j < allHeadings.length; j++) {
+          const other = allHeadings[j];
+          if (other.level <= parentHeading.level && other.wordIndex > parentHeading.wordIndex) {
+            if (heading.wordIndex >= other.wordIndex) {
+              isUnderSameParent = false;
+              break;
+            }
+          }
+        }
+      }
+      if (isUnderSameParent) {
+        siblings.push(heading);
+      }
+    }
+    if (siblings.length <= 1) {
+      return;
+    }
+    MenuBuilder.createMenu({
+      anchorEl,
+      cssClass: "dashreader-heading-menu",
+      items: siblings.map((h) => ({
+        text: h.text,
+        wordIndex: h.wordIndex,
+        level: h.level,
+        isCurrent: h.wordIndex === currentHeading.wordIndex
+      })),
+      onItemClick: (wordIndex) => this.navigateToHeading(wordIndex),
+      showLevel: false,
+      indentByLevel: false
+    });
+  }
+  /**
+   * Shows outline menu with all headings in the document
+   * Displays complete document structure with indentation by level
+   * Highlights current position in the list
+   *
+   * @param anchorEl - The element to position the menu relative to
+   */
+  showOutlineMenu(anchorEl) {
+    this.closeAllMenus();
+    const allHeadings = this.engine.getHeadings();
+    if (allHeadings.length === 0) {
+      return;
+    }
+    const currentIndex = this.engine.getCurrentIndex();
+    const relevantHeadings = allHeadings.filter((h) => h.wordIndex <= currentIndex);
+    const currentHeading = relevantHeadings.length > 0 ? relevantHeadings[relevantHeadings.length - 1] : null;
+    const menu = MenuBuilder.createMenu({
+      anchorEl,
+      cssClass: "dashreader-outline-menu",
+      title: "Document Outline",
+      items: allHeadings.map((h) => ({
+        text: h.text,
+        wordIndex: h.wordIndex,
+        level: h.level,
+        isCurrent: currentHeading ? h.wordIndex === currentHeading.wordIndex : false
+      })),
+      onItemClick: (wordIndex) => this.navigateToHeading(wordIndex),
+      showLevel: true,
+      indentByLevel: true
+    });
+    if (currentHeading) {
+      MenuBuilder.scrollToCurrentItem(menu);
+    }
+  }
+  /**
+   * Navigates to a specific heading by word index
+   * Pauses playback, jumps to the heading position, and resumes if it was playing
+   *
+   * @param wordIndex - Word index to navigate to
+   */
+  navigateToHeading(wordIndex) {
+    const wasPlaying = this.engine.getIsPlaying();
+    if (wasPlaying) {
+      this.engine.pause();
+    }
+    const currentIndex = this.engine.getCurrentIndex();
+    const delta = wordIndex - currentIndex;
+    if (delta < 0) {
+      this.engine.rewind(Math.abs(delta));
+    } else if (delta > 0) {
+      this.engine.forward(delta);
+    }
+    if (wasPlaying) {
+      this.engine.play();
+    }
+  }
+  /**
+   * Resets the breadcrumb state (for new text loading)
+   */
+  reset() {
+    this.lastHeadingContext = null;
+  }
+};
+
 // src/ui-builders.ts
 function createButton(parent, config) {
   const className = config.className ? `${CSS_CLASSES.btn} ${config.className}` : CSS_CLASSES.btn;
@@ -1231,23 +1577,209 @@ function escapeHtml(text) {
 }
 function createWelcomeMessage() {
   return `
-    <div style="font-size: 20px; color: var(--text-muted); text-align: center;">
-      <div style="margin-bottom: 12px;">${ICONS.book} Select text to start reading</div>
-      <div style="font-size: 14px; opacity: 0.7;">or use Cmd+P \u2192 "Read selected text"</div>
+    <div class="dashreader-welcome-message">
+      <div class="dashreader-welcome-icon">${ICONS.book} Select text to start reading</div>
+      <div class="dashreader-welcome-instruction">or use Cmd+P \u2192 "Read selected text"</div>
     </div>
   `;
 }
 function createReadyMessage(wordsToRead, totalWords, startIndex, durationText, sourceInfo = "") {
-  const startInfo = startIndex !== void 0 && startIndex > 0 ? ` <span style="opacity: 0.6;">(starting at word ${startIndex + 1}/${totalWords})</span>` : "";
+  const startInfo = startIndex !== void 0 && startIndex > 0 ? ` <span class="dashreader-ready-start-info">(starting at word ${startIndex + 1}/${totalWords})</span>` : "";
   return `
-    <div style="font-size: 18px; color: var(--text-muted); text-align: center;">
+    <div class="dashreader-ready-message">
       ${sourceInfo}
       Ready to read ${wordsToRead} words${startInfo}<br/>
-      <span style="font-size: 14px; opacity: 0.7;">Estimated time: ~${durationText}</span><br/>
-      <span style="font-size: 14px; opacity: 0.7;">Press Shift+Space to start</span>
+      <span class="dashreader-ready-duration">Estimated time: ~${durationText}</span><br/>
+      <span class="dashreader-ready-duration">Press Shift+Space to start</span>
     </div>
   `;
 }
+
+// src/word-display.ts
+var WordDisplay = class {
+  constructor(wordEl, settings) {
+    /**
+     * Callout icon mapping
+     */
+    this.calloutIcons = {
+      note: "\u{1F4DD}",
+      abstract: "\u{1F4C4}",
+      info: "\u2139\uFE0F",
+      tip: "\u{1F4A1}",
+      success: "\u2705",
+      question: "\u2753",
+      warning: "\u26A0\uFE0F",
+      failure: "\u274C",
+      danger: "\u26A1",
+      bug: "\u{1F41B}",
+      example: "\u{1F4CB}",
+      quote: "\u{1F4AC}"
+    };
+    this.wordEl = wordEl;
+    this.settings = settings;
+  }
+  /**
+   * Updates settings (when user changes font size, etc.)
+   *
+   * @param settings - New settings to apply
+   */
+  updateSettings(settings) {
+    this.settings = settings;
+  }
+  /**
+   * Displays a word with optional heading level or callout type
+   * Handles font size adjustment, icons, and separators
+   *
+   * @param word - The word to display
+   * @param headingLevel - Heading level (1-6) or 0 for normal text/callouts
+   * @param showSeparator - Whether to show separator line before heading/callout
+   * @param calloutType - Callout type (note, abstract, info, etc.) if this is a callout
+   */
+  displayWord(word, headingLevel, showSeparator = false, calloutType) {
+    let fontSizeMultiplier = 1;
+    let fontWeight = "normal";
+    let iconPrefix = "";
+    if (calloutType) {
+      fontSizeMultiplier = 1.2;
+      fontWeight = "bold";
+      iconPrefix = this.calloutIcons[calloutType.toLowerCase()] || "\u{1F4CC}";
+    } else if (headingLevel > 0) {
+      const multipliers = [
+        0,
+        HEADING_MULTIPLIERS.h1,
+        HEADING_MULTIPLIERS.h2,
+        HEADING_MULTIPLIERS.h3,
+        HEADING_MULTIPLIERS.h4,
+        HEADING_MULTIPLIERS.h5,
+        HEADING_MULTIPLIERS.h6
+      ];
+      fontSizeMultiplier = multipliers[headingLevel] || 1;
+      fontWeight = "bold";
+    }
+    const adjustedFontSize = this.settings.fontSize * fontSizeMultiplier;
+    const processedWord = this.processWord(word);
+    this.wordEl.empty();
+    if (showSeparator) {
+      this.wordEl.createDiv({ cls: "dashreader-heading-separator" });
+    }
+    const wordContainer = this.wordEl.createDiv({ cls: "dashreader-word-with-heading" });
+    wordContainer.style.fontSize = `${adjustedFontSize}px`;
+    wordContainer.style.fontWeight = fontWeight;
+    if (iconPrefix) {
+      const iconSpan = wordContainer.createSpan({ text: iconPrefix });
+      iconSpan.style.marginRight = "8px";
+      iconSpan.style.opacity = "0.8";
+    }
+    wordContainer.innerHTML = processedWord;
+  }
+  /**
+   * Processes a word for display with center character highlighting
+   * Escapes HTML to prevent XSS attacks
+   *
+   * @param rawWord - Raw word (may contain special characters)
+   * @returns HTML string with highlighted center character
+   */
+  processWord(rawWord) {
+    if (rawWord === "\n") {
+      return "<br/>";
+    }
+    let word = rawWord.replace(/^\[H\d\]/, "").replace(/^\[CALLOUT:[\w-]+\]/, "");
+    word = escapeHtml(word);
+    if (word.length > 0) {
+      const centerIndex = Math.floor(word.length / 3);
+      const before = word.substring(0, centerIndex);
+      const center = word.charAt(centerIndex);
+      const after = word.substring(centerIndex + 1);
+      return `${before}<span class="dashreader-highlight">${center}</span>${after}`;
+    }
+    return word;
+  }
+  /**
+   * Displays a welcome message (no text loaded)
+   *
+   * @param message - HTML message to display
+   */
+  displayMessage(message) {
+    this.wordEl.innerHTML = message;
+  }
+  /**
+   * Clears the word display
+   */
+  clear() {
+    this.wordEl.empty();
+  }
+};
+
+// src/hotkey-handler.ts
+var HotkeyHandler = class {
+  constructor(settings, callbacks) {
+    this.settings = settings;
+    this.callbacks = callbacks;
+  }
+  /**
+   * Updates settings (when user changes hotkey preferences)
+   *
+   * @param settings - New settings to apply
+   */
+  updateSettings(settings) {
+    this.settings = settings;
+  }
+  /**
+   * Handles keyboard events
+   * Called from keydown event listener in the view
+   *
+   * @param e - Keyboard event
+   */
+  handleKeyPress(e) {
+    const keyCode = e.code || e.key;
+    if (keyCode === "Space" && e.shiftKey) {
+      e.preventDefault();
+      this.callbacks.onTogglePlay();
+      return;
+    }
+    if (this.isInputFocused()) {
+      return;
+    }
+    if (keyCode === this.settings.hotkeyRewind) {
+      e.preventDefault();
+      this.callbacks.onRewind();
+      return;
+    }
+    if (keyCode === this.settings.hotkeyForward) {
+      e.preventDefault();
+      this.callbacks.onForward();
+      return;
+    }
+    if (keyCode === this.settings.hotkeyIncrementWpm) {
+      e.preventDefault();
+      this.callbacks.onIncrementWpm();
+      return;
+    }
+    if (keyCode === this.settings.hotkeyDecrementWpm) {
+      e.preventDefault();
+      this.callbacks.onDecrementWpm();
+      return;
+    }
+    if (keyCode === this.settings.hotkeyQuit) {
+      e.preventDefault();
+      this.callbacks.onQuit();
+      return;
+    }
+  }
+  /**
+   * Checks if an input element is currently focused
+   * Prevents hotkeys from interfering with typing
+   *
+   * @returns True if input/textarea is focused
+   */
+  isInputFocused() {
+    const activeElement = document.activeElement;
+    if (!activeElement)
+      return false;
+    const tagName = activeElement.tagName.toLowerCase();
+    return tagName === "input" || tagName === "textarea";
+  }
+};
 
 // src/auto-load-manager.ts
 var import_obsidian = require("obsidian");
@@ -1369,14 +1901,6 @@ var AutoLoadManager = class {
     if (content.selection && content.selection.length > TEXT_LIMITS.minSelectionLength) {
       if (content.selection !== this.state.lastSelection) {
         this.state.lastSelection = content.selection;
-        console.log(
-          "DashReader: Auto-loading selection",
-          content.selection.length,
-          "characters from",
-          content.fileName,
-          "line",
-          content.lineNumber
-        );
         this.loadTextCallback(content.selection, {
           fileName: content.fileName,
           lineNumber: content.lineNumber
@@ -1387,21 +1911,6 @@ var AutoLoadManager = class {
     if (content.fullContent && content.fullContent.trim().length > TEXT_LIMITS.minContentLength) {
       if (content.cursorPosition !== this.state.lastCursorPosition) {
         const positionDiff = Math.abs(content.cursorPosition - this.state.lastCursorPosition);
-        console.log(
-          "DashReader: Cursor moved from",
-          this.state.lastCursorPosition,
-          "to",
-          content.cursorPosition,
-          "(diff:",
-          positionDiff,
-          ")"
-        );
-        console.log(
-          "DashReader: Reloading from cursor position",
-          content.cursorPosition,
-          "in",
-          content.fileName
-        );
         this.loadTextCallback(content.fullContent, {
           fileName: content.fileName,
           cursorPosition: content.cursorPosition
@@ -1452,12 +1961,6 @@ var AutoLoadManager = class {
       if (!content.activeView || !content.currentFile)
         return;
       if (content.selection && content.selection.length > TEXT_LIMITS.minSelectionLength) {
-        console.log(
-          "DashReader: Auto-loading selection",
-          content.selection.length,
-          "characters from line",
-          content.lineNumber
-        );
         this.loadTextCallback(content.selection, {
           fileName: content.fileName,
           lineNumber: content.lineNumber
@@ -1465,7 +1968,6 @@ var AutoLoadManager = class {
         return;
       }
       if (content.fullContent && content.fullContent.trim().length > TEXT_LIMITS.minContentLength) {
-        console.log("DashReader: Auto-loading entire page from cursor position", content.cursorPosition);
         this.loadTextCallback(content.fullContent, {
           fileName: content.fileName,
           cursorPosition: content.cursorPosition
@@ -1609,6 +2111,16 @@ var DashReaderView = class extends import_obsidian2.ItemView {
   async onOpen() {
     this.mainContainerEl = this.contentEl.createDiv({ cls: CSS_CLASSES.container });
     this.buildUI();
+    this.breadcrumbManager = new BreadcrumbManager(this.breadcrumbEl, this.engine);
+    this.wordDisplay = new WordDisplay(this.wordEl, this.settings);
+    this.hotkeyHandler = new HotkeyHandler(this.settings, {
+      onTogglePlay: () => this.togglePlay(),
+      onRewind: () => this.engine.rewind(),
+      onForward: () => this.engine.forward(),
+      onIncrementWpm: () => this.changeValue("wpm", 10),
+      onDecrementWpm: () => this.changeValue("wpm", -10),
+      onQuit: () => this.engine.stop()
+    });
     this.setupHotkeys();
     this.app.workspace.onLayoutReady(() => {
       this.setupAutoLoad();
@@ -1945,7 +2457,6 @@ var DashReaderView = class extends import_obsidian2.ItemView {
         if (!file)
           return;
         this.autoLoadManager.resetForNewFile(file.path);
-        console.log("DashReader: File opened:", file.path);
         this.autoLoadManager.loadFromEditor(TIMING.autoLoadDelay);
       })
     );
@@ -1953,7 +2464,6 @@ var DashReaderView = class extends import_obsidian2.ItemView {
       this.app.workspace.on("active-leaf-change", () => {
         if (!this.mainContainerEl || !this.mainContainerEl.isShown())
           return;
-        console.log("DashReader: Active leaf changed");
         const currentFile = this.app.workspace.getActiveFile();
         if (currentFile && this.autoLoadManager.hasFileChanged(currentFile.path)) {
           this.autoLoadManager.resetForNewFile(currentFile.path);
@@ -1962,7 +2472,6 @@ var DashReaderView = class extends import_obsidian2.ItemView {
       })
     );
     this.registerDomEvent(document, "mouseup", () => {
-      console.log("DashReader: Mouse click detected");
       setTimeout(() => {
         if (this.mainContainerEl.isShown()) {
           this.autoLoadManager.checkSelectionOrCursor();
@@ -1971,11 +2480,6 @@ var DashReaderView = class extends import_obsidian2.ItemView {
     });
     this.registerDomEvent(document, "keyup", (evt) => {
       if (isNavigationKey(evt) || isSelectionKey(evt)) {
-        console.log("DashReader: Navigation key detected:", evt.key, "with modifiers:", {
-          shift: evt.shiftKey,
-          ctrl: evt.ctrlKey,
-          meta: evt.metaKey
-        });
         setTimeout(() => {
           if (this.mainContainerEl.isShown()) {
             this.autoLoadManager.checkSelectionOrCursor();
@@ -1983,7 +2487,6 @@ var DashReaderView = class extends import_obsidian2.ItemView {
         }, TIMING.autoLoadDelayVeryShort);
       }
     });
-    console.log("DashReader: Auto-load setup complete");
   }
   // ============================================================================
   // SECTION 6: HOTKEYS & KEYBOARD
@@ -2019,35 +2522,7 @@ var DashReaderView = class extends import_obsidian2.ItemView {
       this.togglePanel("stats");
       return;
     }
-    const keyCode = e.code || e.key;
-    if (keyCode === "Space" && e.shiftKey) {
-      e.preventDefault();
-      console.log("DashReader: Shift+Space pressed, toggling play");
-      this.togglePlay();
-      return;
-    }
-    switch (keyCode) {
-      case this.settings.hotkeyRewind:
-        e.preventDefault();
-        this.engine.rewind();
-        break;
-      case this.settings.hotkeyForward:
-        e.preventDefault();
-        this.engine.forward();
-        break;
-      case this.settings.hotkeyIncrementWpm:
-        e.preventDefault();
-        this.changeValue("wpm", INCREMENTS.wpm);
-        break;
-      case this.settings.hotkeyDecrementWpm:
-        e.preventDefault();
-        this.changeValue("wpm", -INCREMENTS.wpm);
-        break;
-      case this.settings.hotkeyQuit:
-        e.preventDefault();
-        this.engine.stop();
-        break;
-    }
+    this.hotkeyHandler.handleKeyPress(e);
   }
   /**
    * Toggles play/pause state
@@ -2085,16 +2560,16 @@ var DashReaderView = class extends import_obsidian2.ItemView {
       headingLevel = parseInt(headingMatch[1]);
       displayText = chunk.text.replace(/^\[H\d\]/, "");
       showSeparator = true;
-      console.log("DashReader: Heading detected - Level", headingLevel, "Text:", displayText);
     } else if (calloutMatch) {
       calloutType = calloutMatch[1];
       displayText = chunk.text.replace(/^\[CALLOUT:[\w-]+\]/, "");
       showSeparator = true;
-      console.log("DashReader: Callout detected - Type", calloutType, "Text:", displayText);
     }
-    this.displayWordWithHeading(displayText, headingLevel, showSeparator, calloutType);
-    if (chunk.headingContext) {
-      this.updateBreadcrumb(chunk.headingContext);
+    this.wordDisplay.displayWord(displayText, headingLevel, showSeparator, calloutType);
+    if (chunk.headingContext && this.breadcrumbManager) {
+      if (this.breadcrumbManager.hasHeadingContextChanged(chunk.headingContext)) {
+        this.breadcrumbManager.updateBreadcrumb(chunk.headingContext);
+      }
     }
     if (this.settings.showContext && this.contextBeforeEl && this.contextAfterEl) {
       const context = this.engine.getContext(this.settings.contextWords);
@@ -2131,12 +2606,11 @@ var DashReaderView = class extends import_obsidian2.ItemView {
     };
     let fontSizeMultiplier = 1;
     let fontWeight = "normal";
-    let prefix = "";
+    let iconPrefix = "";
     if (calloutType) {
       fontSizeMultiplier = 1.2;
       fontWeight = "bold";
-      const icon = calloutIcons[calloutType.toLowerCase()] || "\u{1F4CC}";
-      prefix = `<span style="margin-right: 8px; opacity: 0.8;">${icon}</span>`;
+      iconPrefix = calloutIcons[calloutType.toLowerCase()] || "\u{1F4CC}";
     } else if (headingLevel > 0) {
       const multipliers = [
         0,
@@ -2152,13 +2626,19 @@ var DashReaderView = class extends import_obsidian2.ItemView {
     }
     const adjustedFontSize = this.settings.fontSize * fontSizeMultiplier;
     const processedWord = this.processWord(word);
-    const separator = showSeparator ? `<div style="width: 60%; height: 2px; background: var(--text-muted); opacity: 0.4; margin: 0 auto 20px auto;"></div>` : "";
-    this.wordEl.innerHTML = `
-      ${separator}
-      <div style="font-size: ${adjustedFontSize}px; transition: font-size 0.3s ease; font-weight: ${fontWeight};">
-        ${prefix}${processedWord}
-      </div>
-    `;
+    this.wordEl.empty();
+    if (showSeparator) {
+      this.wordEl.createDiv({ cls: "dashreader-heading-separator" });
+    }
+    const wordContainer = this.wordEl.createDiv({ cls: "dashreader-word-with-heading" });
+    wordContainer.style.fontSize = `${adjustedFontSize}px`;
+    wordContainer.style.fontWeight = fontWeight;
+    if (iconPrefix) {
+      const iconSpan = wordContainer.createSpan({ text: iconPrefix });
+      iconSpan.style.marginRight = "8px";
+      iconSpan.style.opacity = "0.8";
+    }
+    wordContainer.innerHTML = processedWord;
   }
   /**
    * Processes a word for display with center character highlighting
@@ -2180,239 +2660,6 @@ var DashReaderView = class extends import_obsidian2.ItemView {
       }
     }
     return result;
-  }
-  /**
-   * Updates the breadcrumb navigation bar with current heading context
-   * Shows hierarchical path (H1 > H2 > H3) and makes it clickable for navigation
-   *
-   * @param context - Current heading context from engine
-   */
-  updateBreadcrumb(context) {
-    if (!context || context.breadcrumb.length === 0) {
-      this.breadcrumbEl.style.display = "none";
-      return;
-    }
-    this.breadcrumbEl.style.display = "flex";
-    this.breadcrumbEl.style.flexDirection = "column";
-    this.breadcrumbEl.style.gap = "8px";
-    this.breadcrumbEl.empty();
-    const progressContainer = this.breadcrumbEl.createDiv({
-      cls: "dashreader-breadcrumb-progress"
-    });
-    progressContainer.style.display = "flex";
-    progressContainer.style.alignItems = "center";
-    progressContainer.style.gap = "12px";
-    progressContainer.style.fontSize = "12px";
-    progressContainer.style.color = "var(--text-muted)";
-    progressContainer.style.fontWeight = "bold";
-    const allHeadings = this.engine.getHeadings();
-    const allH1s = allHeadings.filter((h) => h.level === 1);
-    const currentIndex = this.engine.getCurrentIndex();
-    let currentSectionIndex = 0;
-    for (let i = 0; i < allH1s.length; i++) {
-      if (allH1s[i].wordIndex <= currentIndex) {
-        currentSectionIndex = i + 1;
-      } else {
-        break;
-      }
-    }
-    const totalWords = this.engine.getTotalWords();
-    const progressPercent = totalWords > 0 ? currentIndex / totalWords * 100 : 0;
-    if (allH1s.length > 0 && currentSectionIndex > 0) {
-      const sectionCounter = progressContainer.createSpan({
-        text: `Section ${currentSectionIndex}/${allH1s.length}`,
-        cls: "dashreader-section-counter"
-      });
-      sectionCounter.style.opacity = "0.8";
-    }
-    const breadcrumbPath = this.breadcrumbEl.createDiv({
-      cls: "dashreader-breadcrumb-path"
-    });
-    breadcrumbPath.style.display = "flex";
-    breadcrumbPath.style.flexWrap = "wrap";
-    breadcrumbPath.style.gap = "4px";
-    breadcrumbPath.style.alignItems = "center";
-    const calloutIcons = {
-      note: "\u{1F4DD}",
-      abstract: "\u{1F4C4}",
-      info: "\u2139\uFE0F",
-      tip: "\u{1F4A1}",
-      success: "\u2705",
-      question: "\u2753",
-      warning: "\u26A0\uFE0F",
-      failure: "\u274C",
-      danger: "\u26A1",
-      bug: "\u{1F41B}",
-      example: "\u{1F4CB}",
-      quote: "\u{1F4AC}"
-    };
-    context.breadcrumb.forEach((heading, index) => {
-      if (index > 0) {
-        const separator = breadcrumbPath.createSpan({
-          cls: "dashreader-breadcrumb-separator",
-          text: " \u203A "
-        });
-        separator.style.opacity = "0.5";
-        separator.style.margin = "0 4px";
-        separator.style.flexShrink = "0";
-      }
-      let displayText = heading.text;
-      if (heading.calloutType) {
-        const icon = calloutIcons[heading.calloutType.toLowerCase()] || "\u{1F4CC}";
-        displayText = `${icon} ${heading.text}`;
-      }
-      const itemContainer = breadcrumbPath.createSpan({
-        cls: "dashreader-breadcrumb-item-container"
-      });
-      itemContainer.style.display = "inline-flex";
-      itemContainer.style.alignItems = "center";
-      itemContainer.style.gap = "4px";
-      const item = itemContainer.createSpan({
-        cls: "dashreader-breadcrumb-item",
-        text: displayText
-      });
-      const isLast = index === context.breadcrumb.length - 1;
-      item.style.cursor = "pointer";
-      item.style.opacity = isLast ? "1" : "0.7";
-      item.style.fontWeight = isLast ? "bold" : "normal";
-      item.style.whiteSpace = "normal";
-      item.style.wordBreak = "break-word";
-      if (heading.calloutType) {
-        item.style.fontSize = "14px";
-      } else {
-        item.style.fontSize = `${12 + 2 * (6 - heading.level)}px`;
-      }
-      item.addEventListener("mouseenter", () => {
-        item.style.opacity = "1";
-        item.style.textDecoration = "underline";
-      });
-      item.addEventListener("mouseleave", () => {
-        item.style.opacity = isLast ? "1" : "0.7";
-        item.style.textDecoration = "none";
-      });
-      item.addEventListener("click", () => {
-        this.navigateToHeading(heading.wordIndex);
-      });
-      const dropdown = itemContainer.createSpan({
-        cls: "dashreader-breadcrumb-dropdown",
-        text: "\u25BC"
-      });
-      dropdown.style.cursor = "pointer";
-      dropdown.style.opacity = "0.4";
-      dropdown.style.fontSize = "10px";
-      dropdown.style.padding = "2px 4px";
-      dropdown.style.borderRadius = "3px";
-      dropdown.style.transition = "all 0.2s";
-      dropdown.addEventListener("mouseenter", () => {
-        dropdown.style.opacity = "1";
-        dropdown.style.backgroundColor = "var(--background-modifier-hover)";
-      });
-      dropdown.addEventListener("mouseleave", () => {
-        dropdown.style.opacity = "0.4";
-        dropdown.style.backgroundColor = "transparent";
-      });
-      dropdown.addEventListener("click", (e) => {
-        e.stopPropagation();
-        this.showHeadingMenu(heading, dropdown);
-      });
-    });
-  }
-  /**
-   * Shows a dropdown menu with all headings of the same level for navigation
-   * @param currentHeading - The heading that was clicked
-   * @param anchorEl - The element to position the menu relative to
-   */
-  showHeadingMenu(currentHeading, anchorEl) {
-    const allHeadings = this.engine.getHeadings();
-    const sameLevelHeadings = allHeadings.filter((h) => h.level === currentHeading.level);
-    if (sameLevelHeadings.length <= 1) {
-      return;
-    }
-    const menu = this.contentEl.createDiv({
-      cls: "dashreader-heading-menu"
-    });
-    const rect = anchorEl.getBoundingClientRect();
-    menu.style.position = "fixed";
-    menu.style.top = `${rect.bottom + 5}px`;
-    menu.style.left = `${rect.left}px`;
-    menu.style.zIndex = "1000";
-    menu.style.backgroundColor = "var(--background-primary)";
-    menu.style.border = "1px solid var(--background-modifier-border)";
-    menu.style.borderRadius = "4px";
-    menu.style.padding = "4px";
-    menu.style.maxHeight = "300px";
-    menu.style.overflowY = "auto";
-    menu.style.boxShadow = "0 2px 8px rgba(0, 0, 0, 0.15)";
-    menu.style.minWidth = "200px";
-    sameLevelHeadings.forEach((heading, index) => {
-      const isCurrent = heading.wordIndex === currentHeading.wordIndex;
-      const menuItem = menu.createDiv({
-        cls: "dashreader-heading-menu-item"
-      });
-      menuItem.style.padding = "6px 12px";
-      menuItem.style.cursor = "pointer";
-      menuItem.style.fontSize = "13px";
-      menuItem.style.borderRadius = "3px";
-      menuItem.style.display = "flex";
-      menuItem.style.alignItems = "center";
-      menuItem.style.gap = "8px";
-      if (isCurrent) {
-        menuItem.style.backgroundColor = "var(--background-modifier-hover)";
-        menuItem.style.fontWeight = "bold";
-      }
-      const number = menuItem.createSpan({
-        text: `${index + 1}.`
-      });
-      number.style.opacity = "0.6";
-      number.style.minWidth = "25px";
-      const text = menuItem.createSpan({
-        text: heading.text
-      });
-      text.style.flex = "1";
-      if (!isCurrent) {
-        menuItem.addEventListener("mouseenter", () => {
-          menuItem.style.backgroundColor = "var(--background-modifier-hover)";
-        });
-        menuItem.addEventListener("mouseleave", () => {
-          menuItem.style.backgroundColor = "transparent";
-        });
-      }
-      menuItem.addEventListener("click", () => {
-        this.navigateToHeading(heading.wordIndex);
-        menu.remove();
-      });
-    });
-    const closeMenu = (e) => {
-      if (!menu.contains(e.target)) {
-        menu.remove();
-        document.removeEventListener("click", closeMenu);
-      }
-    };
-    setTimeout(() => {
-      document.addEventListener("click", closeMenu);
-    }, 10);
-  }
-  /**
-   * Navigates to a specific heading by word index
-   * Pauses playback, jumps to the heading position, and resumes if it was playing
-   *
-   * @param wordIndex - Word index to navigate to
-   */
-  navigateToHeading(wordIndex) {
-    const wasPlaying = this.engine.getIsPlaying();
-    if (wasPlaying) {
-      this.engine.pause();
-    }
-    const currentIndex = this.engine.getCurrentIndex();
-    const delta = wordIndex - currentIndex;
-    if (delta < 0) {
-      this.engine.rewind(Math.abs(delta));
-    } else if (delta > 0) {
-      this.engine.forward(delta);
-    }
-    if (wasPlaying) {
-      this.engine.play();
-    }
   }
   /**
    * Called by engine when reading is complete
@@ -2455,32 +2702,20 @@ var DashReaderView = class extends import_obsidian2.ItemView {
    * @param source - Optional source information (filename, line, cursor position)
    */
   loadText(text, source) {
-    console.log("DashReader: loadText called with source:", source);
     if (this.engine.getIsPlaying()) {
       this.engine.stop();
       updatePlayPauseButtons(this.dom, false);
-      console.log("DashReader: Stopped current reading");
     }
-    console.log("DashReader: Parsing markdown, original length:", text.length);
+    this.breadcrumbManager.reset();
     const plainText = MarkdownParser.parseToPlainText(text);
-    console.log("DashReader: After parsing, length:", plainText.length);
-    console.log("DashReader: First 100 chars:", plainText.substring(0, 100));
     let wordIndexFromCursor;
     if ((source == null ? void 0 : source.cursorPosition) !== void 0) {
-      console.log("DashReader: Cursor position detected:", source.cursorPosition);
       const textUpToCursor = text.substring(0, source.cursorPosition);
       const parsedUpToCursor = MarkdownParser.parseToPlainText(textUpToCursor);
       const wordsBeforeCursor = parsedUpToCursor.trim().split(/\s+/).filter((w) => w.length > 0);
       wordIndexFromCursor = wordsBeforeCursor.length;
-      console.log("DashReader: Original text up to cursor:", textUpToCursor.length, "chars");
-      console.log("DashReader: Parsed text up to cursor:", parsedUpToCursor.length, "chars");
-      console.log("DashReader: Words before cursor (after parsing):", wordsBeforeCursor.slice(0, 10), "...");
-      console.log("DashReader: Cursor at character", source.cursorPosition, "\u2192 word index", wordIndexFromCursor, "(in parsed text)");
-    } else {
-      console.log("DashReader: No cursor position provided");
     }
     if (!plainText || plainText.trim().length < TEXT_LIMITS.minParsedLength) {
-      console.log("DashReader: Text too short after parsing");
       return;
     }
     this.engine.setText(plainText, void 0, wordIndexFromCursor);
@@ -2494,7 +2729,7 @@ var DashReaderView = class extends import_obsidian2.ItemView {
     if (source == null ? void 0 : source.fileName) {
       const escapedFileName = escapeHtml(source.fileName);
       const lineInfo = source.lineNumber ? ` (line ${source.lineNumber})` : "";
-      sourceInfo = `<div style="font-size: 14px; opacity: 0.6; margin-bottom: 8px;">
+      sourceInfo = `<div class="dashreader-ready-source">
         ${ICONS.file} ${escapedFileName}${lineInfo}
       </div>`;
     }
@@ -2506,7 +2741,6 @@ var DashReaderView = class extends import_obsidian2.ItemView {
     const wordInfo = wordIndexFromCursor && wordIndexFromCursor > 0 ? `${remainingWords}/${totalWords} words` : `${totalWords} words`;
     this.dom.updateText("statsText", `${wordInfo} loaded${fileInfo} - ~${durationText} - Shift+Space to start`);
     this.wordEl.innerHTML = createReadyMessage(remainingWords, totalWords, wordIndexFromCursor, durationText, sourceInfo);
-    console.log("DashReader: Words to read:", remainingWords, "out of", totalWords);
     const allHeadings = this.engine.getHeadings();
     if (allHeadings.length > 0) {
       const startIndex = wordIndexFromCursor != null ? wordIndexFromCursor : 0;
@@ -2527,7 +2761,9 @@ var DashReaderView = class extends import_obsidian2.ItemView {
           breadcrumb,
           current: breadcrumb[breadcrumb.length - 1] || null
         };
-        this.updateBreadcrumb(initialContext);
+        if (this.breadcrumbManager) {
+          this.breadcrumbManager.updateBreadcrumb(initialContext);
+        }
       }
     }
     if (this.settings.autoStart) {
@@ -2566,40 +2802,129 @@ var DashReaderSettingTab = class extends import_obsidian3.PluginSettingTab {
     super(app, plugin);
     this.plugin = plugin;
   }
+  /**
+   * Helper method to create a slider with an editable numeric display
+   */
+  createSliderWithInput(setting, min, max, step, value, unit = "", onChange) {
+    let inputEl;
+    setting.addSlider((slider) => slider.setLimits(min, max, step).setValue(value).setDynamicTooltip().onChange(async (newValue) => {
+      inputEl.value = newValue.toString();
+      await onChange(newValue);
+    }));
+    inputEl = setting.controlEl.createEl("input", {
+      type: "text",
+      value: value.toString()
+    });
+    inputEl.style.width = "50px";
+    inputEl.style.textAlign = "center";
+    inputEl.style.marginLeft = "10px";
+    inputEl.style.border = "1px solid var(--background-modifier-border)";
+    inputEl.style.borderRadius = "3px";
+    inputEl.style.padding = "2px 4px";
+    if (unit) {
+      const unitLabel = setting.controlEl.createSpan({ text: unit });
+      unitLabel.style.marginLeft = "4px";
+      unitLabel.style.opacity = "0.7";
+    }
+    inputEl.addEventListener("change", async () => {
+      let newValue = parseFloat(inputEl.value);
+      if (isNaN(newValue)) {
+        newValue = value;
+      } else {
+        newValue = Math.max(min, Math.min(max, newValue));
+        newValue = Math.round(newValue / step) * step;
+      }
+      inputEl.value = newValue.toString();
+      const sliderEl = setting.controlEl.querySelector('input[type="range"]');
+      if (sliderEl) {
+        sliderEl.value = newValue.toString();
+      }
+      await onChange(newValue);
+    });
+  }
   display() {
     const { containerEl } = this;
     containerEl.empty();
     containerEl.createEl("h2", { text: "DashReader Settings" });
     containerEl.createEl("h3", { text: "Reading Settings" });
-    new import_obsidian3.Setting(containerEl).setName("Words per minute (WPM)").setDesc("Reading speed (50-1000)").addSlider((slider) => slider.setLimits(50, 1e3, 25).setValue(this.plugin.settings.wpm).setDynamicTooltip().onChange(async (value) => {
-      this.plugin.settings.wpm = value;
-      await this.plugin.saveSettings();
-    }));
-    new import_obsidian3.Setting(containerEl).setName("Words at a time").setDesc("Number of words displayed simultaneously (1-5)").addSlider((slider) => slider.setLimits(1, 5, 1).setValue(this.plugin.settings.chunkSize).setDynamicTooltip().onChange(async (value) => {
-      this.plugin.settings.chunkSize = value;
-      await this.plugin.saveSettings();
-    }));
-    new import_obsidian3.Setting(containerEl).setName("Font size").setDesc("Font size in pixels (20-120px)").addSlider((slider) => slider.setLimits(20, 120, 4).setValue(this.plugin.settings.fontSize).setDynamicTooltip().onChange(async (value) => {
-      this.plugin.settings.fontSize = value;
-      await this.plugin.saveSettings();
-    }));
+    const wpmSetting = new import_obsidian3.Setting(containerEl).setName("Words per minute (WPM)").setDesc("Reading speed (50-5000)");
+    this.createSliderWithInput(
+      wpmSetting,
+      50,
+      5e3,
+      25,
+      this.plugin.settings.wpm,
+      "",
+      async (value) => {
+        this.plugin.settings.wpm = value;
+        await this.plugin.saveSettings();
+      }
+    );
+    const chunkSetting = new import_obsidian3.Setting(containerEl).setName("Words at a time").setDesc("Number of words displayed simultaneously (1-5)");
+    this.createSliderWithInput(
+      chunkSetting,
+      1,
+      5,
+      1,
+      this.plugin.settings.chunkSize,
+      "",
+      async (value) => {
+        this.plugin.settings.chunkSize = value;
+        await this.plugin.saveSettings();
+      }
+    );
+    const fontSizeSetting = new import_obsidian3.Setting(containerEl).setName("Font size").setDesc("Font size in pixels (20-120px)");
+    this.createSliderWithInput(
+      fontSizeSetting,
+      20,
+      120,
+      4,
+      this.plugin.settings.fontSize,
+      "px",
+      async (value) => {
+        this.plugin.settings.fontSize = value;
+        await this.plugin.saveSettings();
+      }
+    );
     new import_obsidian3.Setting(containerEl).setName("Font family").setDesc("Font family for text display").addDropdown((dropdown) => dropdown.addOption("inherit", "Default").addOption("monospace", "Monospace").addOption("serif", "Serif").addOption("sans-serif", "Sans-serif").setValue(this.plugin.settings.fontFamily).onChange(async (value) => {
       this.plugin.settings.fontFamily = value;
       await this.plugin.saveSettings();
     }));
-    containerEl.createEl("h3", { text: "Speed Acceleration" });
+    containerEl.createEl("h3", { text: "Reading Enhancements" });
+    new import_obsidian3.Setting(containerEl).setName("Slow Start").setDesc("Gradually increase speed over first 5 words for comfortable start").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableSlowStart).onChange(async (value) => {
+      this.plugin.settings.enableSlowStart = value;
+      await this.plugin.saveSettings();
+    }));
     new import_obsidian3.Setting(containerEl).setName("Enable acceleration").setDesc("Gradually increase reading speed over time").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableAcceleration).onChange(async (value) => {
       this.plugin.settings.enableAcceleration = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian3.Setting(containerEl).setName("Acceleration duration").setDesc("Duration to reach target speed (seconds)").addSlider((slider) => slider.setLimits(10, 120, 5).setValue(this.plugin.settings.accelerationDuration).setDynamicTooltip().onChange(async (value) => {
-      this.plugin.settings.accelerationDuration = value;
-      await this.plugin.saveSettings();
-    }));
-    new import_obsidian3.Setting(containerEl).setName("Target WPM").setDesc("Target reading speed to reach (50-1000)").addSlider((slider) => slider.setLimits(50, 1e3, 25).setValue(this.plugin.settings.accelerationTargetWpm).setDynamicTooltip().onChange(async (value) => {
-      this.plugin.settings.accelerationTargetWpm = value;
-      await this.plugin.saveSettings();
-    }));
+    const accelDurationSetting = new import_obsidian3.Setting(containerEl).setName("Acceleration duration").setDesc("Duration to reach target speed (seconds)");
+    this.createSliderWithInput(
+      accelDurationSetting,
+      10,
+      120,
+      5,
+      this.plugin.settings.accelerationDuration,
+      "s",
+      async (value) => {
+        this.plugin.settings.accelerationDuration = value;
+        await this.plugin.saveSettings();
+      }
+    );
+    const accelTargetSetting = new import_obsidian3.Setting(containerEl).setName("Target WPM").setDesc("Target reading speed to reach (50-5000)");
+    this.createSliderWithInput(
+      accelTargetSetting,
+      50,
+      5e3,
+      25,
+      this.plugin.settings.accelerationTargetWpm,
+      "",
+      async (value) => {
+        this.plugin.settings.accelerationTargetWpm = value;
+        await this.plugin.saveSettings();
+      }
+    );
     containerEl.createEl("h3", { text: "Appearance" });
     new import_obsidian3.Setting(containerEl).setName("Highlight color").setDesc("Color for the center character highlight").addText((text) => text.setPlaceholder("#4a9eff").setValue(this.plugin.settings.highlightColor).onChange(async (value) => {
       this.plugin.settings.highlightColor = value;
@@ -2618,36 +2943,146 @@ var DashReaderSettingTab = class extends import_obsidian3.PluginSettingTab {
       this.plugin.settings.showContext = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian3.Setting(containerEl).setName("Context words").setDesc("Number of context words to display (1-10)").addSlider((slider) => slider.setLimits(1, 10, 1).setValue(this.plugin.settings.contextWords).setDynamicTooltip().onChange(async (value) => {
-      this.plugin.settings.contextWords = value;
-      await this.plugin.saveSettings();
-    }));
+    const contextSetting = new import_obsidian3.Setting(containerEl).setName("Context words").setDesc("Number of context words to display (1-10)");
+    this.createSliderWithInput(
+      contextSetting,
+      1,
+      10,
+      1,
+      this.plugin.settings.contextWords,
+      "",
+      async (value) => {
+        this.plugin.settings.contextWords = value;
+        await this.plugin.saveSettings();
+      }
+    );
     containerEl.createEl("h3", { text: "Micropause" });
     new import_obsidian3.Setting(containerEl).setName("Enable micropause").setDesc("Automatic pauses based on punctuation and word length").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableMicropause).onChange(async (value) => {
       this.plugin.settings.enableMicropause = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian3.Setting(containerEl).setName("Punctuation pause").setDesc("Pause multiplier for punctuation (1.0-3.0)").addSlider((slider) => slider.setLimits(1, 3, 0.1).setValue(this.plugin.settings.micropausePunctuation).setDynamicTooltip().onChange(async (value) => {
-      this.plugin.settings.micropausePunctuation = value;
-      await this.plugin.saveSettings();
-    }));
-    new import_obsidian3.Setting(containerEl).setName("Long words pause").setDesc("Pause multiplier for long words (1.0-2.0)").addSlider((slider) => slider.setLimits(1, 2, 0.1).setValue(this.plugin.settings.micropauseLongWords).setDynamicTooltip().onChange(async (value) => {
-      this.plugin.settings.micropauseLongWords = value;
-      await this.plugin.saveSettings();
-    }));
-    new import_obsidian3.Setting(containerEl).setName("Paragraph pause").setDesc("Pause multiplier for paragraph breaks (1.0-5.0)").addSlider((slider) => slider.setLimits(1, 5, 0.5).setValue(this.plugin.settings.micropauseParagraph).setDynamicTooltip().onChange(async (value) => {
-      this.plugin.settings.micropauseParagraph = value;
-      await this.plugin.saveSettings();
-    }));
+    const punctuationSetting = new import_obsidian3.Setting(containerEl).setName("Sentence-ending punctuation pause").setDesc("Pause multiplier for .,!? (1.0-3.0)");
+    this.createSliderWithInput(
+      punctuationSetting,
+      1,
+      3,
+      0.1,
+      this.plugin.settings.micropausePunctuation,
+      "x",
+      async (value) => {
+        this.plugin.settings.micropausePunctuation = value;
+        await this.plugin.saveSettings();
+      }
+    );
+    const otherPunctuationSetting = new import_obsidian3.Setting(containerEl).setName("Other punctuation pause").setDesc("Pause multiplier for ;:, (1.0-3.0)");
+    this.createSliderWithInput(
+      otherPunctuationSetting,
+      1,
+      3,
+      0.1,
+      this.plugin.settings.micropauseOtherPunctuation,
+      "x",
+      async (value) => {
+        this.plugin.settings.micropauseOtherPunctuation = value;
+        await this.plugin.saveSettings();
+      }
+    );
+    const longWordsSetting = new import_obsidian3.Setting(containerEl).setName("Long words pause").setDesc("Pause multiplier for long words >8 chars (1.0-2.0)");
+    this.createSliderWithInput(
+      longWordsSetting,
+      1,
+      2,
+      0.1,
+      this.plugin.settings.micropauseLongWords,
+      "x",
+      async (value) => {
+        this.plugin.settings.micropauseLongWords = value;
+        await this.plugin.saveSettings();
+      }
+    );
+    const paragraphSetting = new import_obsidian3.Setting(containerEl).setName("Paragraph pause").setDesc("Pause multiplier for paragraph breaks (1.0-5.0)");
+    this.createSliderWithInput(
+      paragraphSetting,
+      1,
+      5,
+      0.1,
+      this.plugin.settings.micropauseParagraph,
+      "x",
+      async (value) => {
+        this.plugin.settings.micropauseParagraph = value;
+        await this.plugin.saveSettings();
+      }
+    );
+    const numbersSetting = new import_obsidian3.Setting(containerEl).setName("Numbers pause").setDesc("Pause multiplier for numbers and dates (1.0-3.0)");
+    this.createSliderWithInput(
+      numbersSetting,
+      1,
+      3,
+      0.1,
+      this.plugin.settings.micropauseNumbers,
+      "x",
+      async (value) => {
+        this.plugin.settings.micropauseNumbers = value;
+        await this.plugin.saveSettings();
+      }
+    );
+    const sectionMarkersSetting = new import_obsidian3.Setting(containerEl).setName("Section markers pause").setDesc("Pause multiplier for 1., I., A., etc. (1.0-3.0)");
+    this.createSliderWithInput(
+      sectionMarkersSetting,
+      1,
+      3,
+      0.1,
+      this.plugin.settings.micropauseSectionMarkers,
+      "x",
+      async (value) => {
+        this.plugin.settings.micropauseSectionMarkers = value;
+        await this.plugin.saveSettings();
+      }
+    );
+    const listBulletsSetting = new import_obsidian3.Setting(containerEl).setName("List bullets pause").setDesc("Pause multiplier for -, *, +, \u2022 (1.0-3.0)");
+    this.createSliderWithInput(
+      listBulletsSetting,
+      1,
+      3,
+      0.1,
+      this.plugin.settings.micropauseListBullets,
+      "x",
+      async (value) => {
+        this.plugin.settings.micropauseListBullets = value;
+        await this.plugin.saveSettings();
+      }
+    );
+    const calloutsSetting = new import_obsidian3.Setting(containerEl).setName("Callouts pause").setDesc("Pause multiplier for Obsidian callouts (1.0-3.0)");
+    this.createSliderWithInput(
+      calloutsSetting,
+      1,
+      3,
+      0.1,
+      this.plugin.settings.micropauseCallouts,
+      "x",
+      async (value) => {
+        this.plugin.settings.micropauseCallouts = value;
+        await this.plugin.saveSettings();
+      }
+    );
     containerEl.createEl("h3", { text: "Auto-start" });
     new import_obsidian3.Setting(containerEl).setName("Auto-start reading").setDesc("Automatically start reading after text loads").addToggle((toggle) => toggle.setValue(this.plugin.settings.autoStart).onChange(async (value) => {
       this.plugin.settings.autoStart = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian3.Setting(containerEl).setName("Auto-start delay").setDesc("Delay before auto-start (seconds)").addSlider((slider) => slider.setLimits(1, 10, 1).setValue(this.plugin.settings.autoStartDelay).setDynamicTooltip().onChange(async (value) => {
-      this.plugin.settings.autoStartDelay = value;
-      await this.plugin.saveSettings();
-    }));
+    const autoStartDelaySetting = new import_obsidian3.Setting(containerEl).setName("Auto-start delay").setDesc("Delay before auto-start (seconds)");
+    this.createSliderWithInput(
+      autoStartDelaySetting,
+      1,
+      10,
+      1,
+      this.plugin.settings.autoStartDelay,
+      "s",
+      async (value) => {
+        this.plugin.settings.autoStartDelay = value;
+        await this.plugin.saveSettings();
+      }
+    );
     containerEl.createEl("h3", { text: "Display Options" });
     new import_obsidian3.Setting(containerEl).setName("Show progress bar").setDesc("Display reading progress bar").addToggle((toggle) => toggle.setValue(this.plugin.settings.showProgress).onChange(async (value) => {
       this.plugin.settings.showProgress = value;

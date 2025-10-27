@@ -437,3 +437,201 @@
 .dashreader-container::-webkit-scrollbar-thumb:hover {
   background: var(--interactive-accent);
 }
+
+/* ===== MESSAGES (WELCOME & READY) ===== */
+.dashreader-welcome-message {
+  font-size: 20px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.dashreader-welcome-icon {
+  margin-bottom: 12px;
+}
+
+.dashreader-welcome-instruction {
+  font-size: 14px;
+  opacity: 0.7;
+}
+
+.dashreader-ready-message {
+  font-size: 18px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.dashreader-ready-source {
+  font-size: 14px;
+  opacity: 0.6;
+  margin-bottom: 8px;
+}
+
+.dashreader-ready-duration {
+  font-size: 14px;
+  opacity: 0.7;
+}
+
+.dashreader-ready-start-info {
+  opacity: 0.6;
+}
+
+/* ===== MENUS DROPDOWN ===== */
+.dashreader-menu {
+  position: fixed;
+  z-index: 10000;
+  background-color: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  padding: 8px;
+  max-height: 400px;
+  overflow-y: auto;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  min-width: 300px;
+  max-width: 500px;
+}
+
+.dashreader-heading-menu {
+  position: fixed;
+  z-index: 10000;
+  background-color: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  padding: 8px;
+  max-height: 300px;
+  overflow-y: auto;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  min-width: 300px;
+  max-width: 400px;
+}
+
+.dashreader-outline-menu {
+  position: fixed;
+  z-index: 10000;
+  background-color: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  padding: 8px;
+  max-height: 400px;
+  overflow-y: auto;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  min-width: 300px;
+  max-width: 500px;
+}
+
+/* Menu title */
+.dashreader-menu-title {
+  font-weight: bold;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  font-size: 13px;
+  opacity: 0.8;
+}
+
+/* Menu items */
+.dashreader-menu-item {
+  padding: 4px 8px;
+  cursor: pointer;
+  border-radius: 3px;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: background-color 0.1s ease;
+}
+
+.dashreader-menu-item:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+.dashreader-menu-item-current {
+  background-color: var(--background-modifier-hover);
+  font-weight: bold;
+  border-left: 3px solid var(--interactive-accent);
+  padding-left: 5px;
+}
+
+/* Outline specific styles */
+.dashreader-outline-item {
+  padding: 4px 8px;
+  cursor: pointer;
+  border-radius: 3px;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: background-color 0.1s ease;
+}
+
+.dashreader-outline-item:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+.dashreader-outline-level {
+  font-size: 10px;
+  opacity: 0.5;
+  font-weight: bold;
+  min-width: 24px;
+}
+
+.dashreader-outline-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Breadcrumb header with outline button */
+.dashreader-breadcrumb-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.dashreader-outline-button {
+  cursor: pointer;
+  font-size: 18px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  opacity: 0.6;
+  transition: all 0.2s ease;
+}
+
+.dashreader-outline-button:hover {
+  opacity: 1;
+  background-color: var(--background-modifier-hover);
+}
+
+/* Breadcrumb path container */
+.dashreader-breadcrumb-path {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+/* Breadcrumb dropdown indicator */
+.dashreader-breadcrumb-dropdown {
+  cursor: pointer;
+  opacity: 0.4;
+  margin-left: 4px;
+  transition: opacity 0.2s ease;
+}
+
+.dashreader-breadcrumb-dropdown:hover {
+  opacity: 1;
+}
+
+/* ===== HEADING DISPLAY ===== */
+.dashreader-heading-separator {
+  width: 60%;
+  height: 2px;
+  background: var(--text-muted);
+  opacity: 0.4;
+  margin: 0 auto 20px auto;
+}
+
+.dashreader-word-with-heading {
+  transition: font-size 0.3s ease;
+}
