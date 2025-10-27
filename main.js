@@ -367,18 +367,59 @@ var DEFAULT_VIEW_STATE = {
   isLoading: false
 };
 var ViewState = class {
+  /**
+   * Creates a new ViewState instance
+   *
+   * @param initialState - Optional partial state to merge with defaults
+   *
+   * @example
+   * ```typescript
+   * // Default state
+   * const state = new ViewState();
+   *
+   * // With initial values
+   * const state = new ViewState({
+   *   currentWpm: 300,
+   *   showingControls: true
+   * });
+   * ```
+   */
   constructor(initialState = {}) {
     this.listeners = /* @__PURE__ */ new Set();
     this.state = { ...DEFAULT_VIEW_STATE, ...initialState };
   }
   /**
-   * Get a state value
+   * Get a state value (type-safe)
+   *
+   * Uses TypeScript generics to ensure return type matches the requested key.
+   *
+   * @param key - State property to get
+   * @returns Current value of the property
+   *
+   * @example
+   * ```typescript
+   * const wpm: number = state.get('currentWpm');
+   * const showing: boolean = state.get('showingControls');
+   * ```
    */
   get(key) {
     return this.state[key];
   }
   /**
-   * Set a state value and notify listeners
+   * Set a state value and notify listeners (type-safe)
+   *
+   * Updates the state property and notifies all subscribers if the value changed.
+   * Automatically skips notification if the new value equals the old value.
+   *
+   * @param key - State property to set
+   * @param value - New value for the property
+   *
+   * @example
+   * ```typescript
+   * state.set('currentWpm', 350);
+   * state.set('showingControls', true);
+   * state.set('loadedFileName', 'My Note.md');
+   * ```
    */
   set(key, value) {
     const oldValue = this.state[key];
@@ -388,7 +429,21 @@ var ViewState = class {
     this.notify(key, value, oldValue);
   }
   /**
-   * Update multiple state values at once
+   * Update multiple state values at once (batch update)
+   *
+   * Efficiently updates multiple properties in a single call. Each changed
+   * property will trigger its own notification to listeners.
+   *
+   * @param updates - Partial state object with properties to update
+   *
+   * @example
+   * ```typescript
+   * state.update({
+   *   currentWpm: 350,
+   *   showingControls: true,
+   *   wordsRead: 42
+   * });
+   * ```
    */
   update(updates) {
     Object.entries(updates).forEach(([key, value]) => {
@@ -396,7 +451,16 @@ var ViewState = class {
     });
   }
   /**
-   * Reset state to defaults
+   * Reset all state to default values
+   *
+   * Sets every state property back to its default value from DEFAULT_VIEW_STATE.
+   * Each reset property triggers a notification to listeners.
+   *
+   * @example
+   * ```typescript
+   * // After reading session, reset to defaults
+   * state.reset();
+   * ```
    */
   reset() {
     Object.entries(DEFAULT_VIEW_STATE).forEach(([key, value]) => {
@@ -404,14 +468,45 @@ var ViewState = class {
     });
   }
   /**
-   * Subscribe to state changes
+   * Subscribe to state changes (observer pattern)
+   *
+   * Registers a listener function that will be called whenever any state
+   * property changes. Returns an unsubscribe function for cleanup.
+   *
+   * **Error Handling**: Listener errors are caught and logged to prevent
+   * one broken listener from breaking all listeners.
+   *
+   * @param listener - Callback function to call on state changes
+   * @returns Unsubscribe function to remove the listener
+   *
+   * @example
+   * ```typescript
+   * // Subscribe and get unsubscribe function
+   * const unsubscribe = state.subscribe((key, value, oldValue) => {
+   *   if (key === 'currentWpm') {
+   *     console.log(`WPM changed from ${oldValue} to ${value}`);
+   *   }
+   * });
+   *
+   * // Later, cleanup
+   * unsubscribe();
+   * ```
    */
   subscribe(listener) {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
   /**
-   * Notify all listeners of a state change
+   * Notify all listeners of a state change (internal)
+   *
+   * Calls each registered listener with the changed property details.
+   * Catches and logs errors to prevent one broken listener from affecting others.
+   *
+   * @param key - Name of the property that changed
+   * @param value - New value of the property
+   * @param oldValue - Previous value of the property
+   *
+   * @private
    */
   notify(key, value, oldValue) {
     this.listeners.forEach((listener) => {
@@ -424,12 +519,37 @@ var ViewState = class {
   }
   /**
    * Get all state as a plain object (for debugging)
+   *
+   * Returns a shallow copy of the entire state object. Useful for logging
+   * or debugging state issues.
+   *
+   * @returns Readonly copy of the full state
+   *
+   * @example
+   * ```typescript
+   * console.log('Current state:', state.getAll());
+   * // Output: { wordsRead: 42, currentWpm: 350, showingControls: true, ... }
+   * ```
    */
   getAll() {
     return { ...this.state };
   }
   /**
-   * Toggle a boolean state value
+   * Toggle a boolean state value (helper)
+   *
+   * Convenience method for toggling boolean properties. Flips the value
+   * from true to false or false to true.
+   *
+   * @param key - Boolean property to toggle (showingControls, showingSettings, showingStats, isLoading)
+   *
+   * @example
+   * ```typescript
+   * // Toggle control panel visibility
+   * state.toggle('showingControls');
+   *
+   * // Toggle settings panel
+   * state.toggle('showingSettings');
+   * ```
    */
   toggle(key) {
     const currentValue = this.get(key);
@@ -438,7 +558,25 @@ var ViewState = class {
     }
   }
   /**
-   * Increment a numeric state value
+   * Increment a numeric state value (helper)
+   *
+   * Convenience method for incrementing numeric properties. Can add positive
+   * or negative deltas.
+   *
+   * @param key - Numeric property to increment (currently only wordsRead)
+   * @param delta - Amount to add (default: 1, can be negative)
+   *
+   * @example
+   * ```typescript
+   * // Increment words read by 1
+   * state.increment('wordsRead');
+   *
+   * // Increment by 5
+   * state.increment('wordsRead', 5);
+   *
+   * // Decrement by 1
+   * state.increment('wordsRead', -1);
+   * ```
    */
   increment(key, delta = 1) {
     const currentValue = this.get(key);
@@ -495,48 +633,81 @@ var CSS_CLASSES = {
   hidden: "hidden"
 };
 var TIMING = {
+  /** Delay before auto-loading content from editor (file-open event) */
   autoLoadDelay: 300,
+  /** Shorter delay for leaf-change events (editor already active) */
   autoLoadDelayShort: 200,
+  /** Very short delay for immediate operations */
   autoLoadDelayVeryShort: 50,
+  /** Throttle interval for cursor/selection checks (prevents excessive checks) */
   throttleDelay: 150,
+  /** CSS transition duration for smooth animations */
   transitionDuration: 300
 };
 var TEXT_LIMITS = {
+  /** Minimum characters in selection to trigger auto-load */
   minSelectionLength: 30,
+  /** Minimum characters in full document to load */
   minContentLength: 50,
+  /** Minimum words in parsed text to display */
   minParsedLength: 10
 };
 var INCREMENTS = {
+  /** WPM increment (25 = noticeable speed change) */
   wpm: 25,
+  /** Chunk size increment (1 word at a time) */
   chunkSize: 1,
+  /** Font size increment in pixels (4px = visible change) */
   fontSize: 4,
+  /** Acceleration duration increment in seconds */
   accelDuration: 5
 };
 var LIMITS = {
+  /** Font size range in pixels (20 = readable minimum, 120 = fills viewport) */
   fontSize: { min: 20, max: 120 },
+  /** WPM range (50 = very slow, 1000 = speed reading limit) */
   wpm: { min: 50, max: 1e3 },
+  /** Acceleration duration in seconds (10 = quick ramp, 120 = gradual) */
   accelDuration: { min: 10, max: 120 }
 };
 var ICONS = {
+  /** Rewind to start button */
   rewind: "\u23EE",
+  /** Play button */
   play: "\u25B6",
+  /** Pause button */
   pause: "\u23F8",
+  /** Skip forward button */
   forward: "\u23ED",
+  /** Stop button */
   stop: "\u23F9",
+  /** Increment (+) button */
   increment: "+",
+  /** Decrement (−) button (using minus sign, not hyphen) */
   decrement: "\u2212",
+  /** Settings toggle button */
   settings: "\u2699\uFE0F",
+  /** Statistics toggle button */
   stats: "\u{1F4CA}",
+  /** File/document indicator */
   file: "\u{1F4C4}",
+  /** Celebration (reading complete) */
   celebration: "\u{1F389}",
+  /** Book/reading indicator */
   book: "\u{1F4D6}"
 };
 var HEADING_MULTIPLIERS = {
+  /** H1 heading multiplier (2x base font = major section) */
   h1: 2,
+  /** H2 heading multiplier (1.75x base font) */
   h2: 1.75,
+  /** H3 heading multiplier (1.5x base font) */
   h3: 1.5,
+  /** H4 heading multiplier (1.25x base font) */
   h4: 1.25,
+  /** H5 heading multiplier (1.1x base font) */
   h5: 1.1,
+  /** H6 heading multiplier (1x base font = same as body text) */
   h6: 1
 };
 
@@ -547,18 +718,56 @@ var DOMRegistry = class {
   }
   /**
    * Register a DOM element by key
+   *
+   * Stores an element reference for later retrieval and updates. Should be
+   * called once per element during UI construction.
+   *
+   * @param key - Type-safe key for the element (from DOMElementKey union)
+   * @param element - HTMLElement to store
+   *
+   * @example
+   * ```typescript
+   * const wpmValue = controlGroup.createSpan({ cls: CSS_CLASSES.wpmValue });
+   * this.dom.register('wpmValue', wpmValue);
+   * ```
    */
   register(key, element) {
     this.elements.set(key, element);
   }
   /**
    * Get a registered DOM element
+   *
+   * Retrieves the stored element reference. Returns undefined if the key
+   * was never registered.
+   *
+   * @param key - Key of the element to retrieve
+   * @returns The HTMLElement if registered, undefined otherwise
+   *
+   * @example
+   * ```typescript
+   * const wpmEl = this.dom.get('wpmValue');
+   * if (wpmEl) {
+   *   // Do something with the element
+   * }
+   * ```
    */
   get(key) {
     return this.elements.get(key);
   }
   /**
-   * Update text content of a registered element
+   * Update text content of a registered element (XSS-safe)
+   *
+   * Uses Obsidian's setText() method which safely escapes HTML.
+   * Preferred over updateHTML() for displaying user-generated content.
+   *
+   * @param key - Key of the element to update
+   * @param text - Text content to set (string or number)
+   *
+   * @example
+   * ```typescript
+   * this.dom.updateText('wpmValue', 350);
+   * this.dom.updateText('statsText', 'Words: 42 / 1000');
+   * ```
    */
   updateText(key, text) {
     const element = this.elements.get(key);
@@ -567,7 +776,25 @@ var DOMRegistry = class {
     }
   }
   /**
-   * Update HTML content of a registered element (use with caution - ensure content is escaped)
+   * Update HTML content of a registered element
+   *
+   * **⚠️ WARNING**: Use with caution! Ensure content is properly escaped to
+   * prevent XSS attacks. Prefer updateText() for plain text content.
+   *
+   * Only use this when you need to render HTML markup (e.g., syntax highlighting,
+   * formatted text with spans, etc.) and you're certain the content is safe.
+   *
+   * @param key - Key of the element to update
+   * @param html - HTML string to set (MUST be escaped if user-generated)
+   *
+   * @example
+   * ```typescript
+   * // Safe: Generated HTML with no user input
+   * this.dom.updateHTML('wordEl', `<span class="highlight">Word</span>`);
+   *
+   * // UNSAFE: Never do this with user content
+   * // this.dom.updateHTML('wordEl', userInput); // ❌ XSS risk!
+   * ```
    */
   updateHTML(key, html) {
     const element = this.elements.get(key);
@@ -576,7 +803,21 @@ var DOMRegistry = class {
     }
   }
   /**
-   * Update style property of a registered element
+   * Update a CSS style property of a registered element
+   *
+   * Modifies inline styles. Useful for dynamic styling like font size,
+   * colors, or positioning.
+   *
+   * @param key - Key of the element to update
+   * @param property - CSS property name (camelCase, e.g., 'fontSize')
+   * @param value - CSS value as string (e.g., '48px', '#ff0000')
+   *
+   * @example
+   * ```typescript
+   * this.dom.updateStyle('wordEl', 'fontSize', '48px');
+   * this.dom.updateStyle('wordEl', 'color', '#ff0000');
+   * this.dom.updateStyle('progressBar', 'width', '50%');
+   * ```
    */
   updateStyle(key, property, value) {
     const element = this.elements.get(key);
@@ -586,7 +827,22 @@ var DOMRegistry = class {
   }
   /**
    * Toggle CSS class on a registered element
-   * @param force - true to add class, false to remove it
+   *
+   * Conditionally adds or removes a CSS class. Commonly used for show/hide
+   * functionality with CSS_CLASSES.hidden.
+   *
+   * @param key - Key of the element to update
+   * @param className - CSS class name to toggle
+   * @param force - True to add class, false to remove it
+   *
+   * @example
+   * ```typescript
+   * // Show controls (remove 'hidden' class)
+   * this.dom.toggleClass('controlsEl', CSS_CLASSES.hidden, false);
+   *
+   * // Hide controls (add 'hidden' class)
+   * this.dom.toggleClass('controlsEl', CSS_CLASSES.hidden, true);
+   * ```
    */
   toggleClass(key, className, force) {
     const element = this.elements.get(key);
@@ -596,6 +852,18 @@ var DOMRegistry = class {
   }
   /**
    * Add CSS class to a registered element
+   *
+   * Adds a CSS class if not already present. Use for state changes like
+   * highlighting, active states, etc.
+   *
+   * @param key - Key of the element to update
+   * @param className - CSS class name to add
+   *
+   * @example
+   * ```typescript
+   * this.dom.addClass('playBtn', 'active');
+   * this.dom.addClass('wordEl', CSS_CLASSES.highlight);
+   * ```
    */
   addClass(key, className) {
     const element = this.elements.get(key);
@@ -605,6 +873,17 @@ var DOMRegistry = class {
   }
   /**
    * Remove CSS class from a registered element
+   *
+   * Removes a CSS class if present. Use for removing state classes.
+   *
+   * @param key - Key of the element to update
+   * @param className - CSS class name to remove
+   *
+   * @example
+   * ```typescript
+   * this.dom.removeClass('playBtn', 'active');
+   * this.dom.removeClass('wordEl', CSS_CLASSES.highlight);
+   * ```
    */
   removeClass(key, className) {
     const element = this.elements.get(key);
@@ -614,6 +893,17 @@ var DOMRegistry = class {
   }
   /**
    * Empty the content of a registered element
+   *
+   * Removes all child nodes and text content. Useful for clearing containers
+   * before re-rendering.
+   *
+   * @param key - Key of the element to empty
+   *
+   * @example
+   * ```typescript
+   * // Clear the word display before loading new text
+   * this.dom.empty('wordEl');
+   * ```
    */
   empty(key) {
     const element = this.elements.get(key);
@@ -623,18 +913,60 @@ var DOMRegistry = class {
   }
   /**
    * Check if an element is registered
+   *
+   * Returns true if an element with the given key has been registered.
+   *
+   * @param key - Key to check
+   * @returns True if the key is registered, false otherwise
+   *
+   * @example
+   * ```typescript
+   * if (this.dom.has('statsEl')) {
+   *   this.dom.updateText('statsEl', 'New stats');
+   * }
+   * ```
    */
   has(key) {
     return this.elements.has(key);
   }
   /**
    * Clear all registered elements
+   *
+   * Removes all element references from the registry. Typically used during
+   * cleanup or when rebuilding the entire UI.
+   *
+   * @example
+   * ```typescript
+   * // During onunload
+   * this.dom.clear();
+   * ```
    */
   clear() {
     this.elements.clear();
   }
   /**
-   * Update multiple text elements at once
+   * Update multiple text elements at once (batch update)
+   *
+   * Efficiently updates text content of multiple elements in a single call.
+   * More readable than multiple individual updateText() calls.
+   *
+   * @param updates - Object mapping element keys to new text values
+   *
+   * @example
+   * ```typescript
+   * // Update all WPM displays at once
+   * this.dom.updateMultipleText({
+   *   wpmDisplay: `${wpm} WPM`,
+   *   wpmValue: String(wpm),
+   *   wpmInlineValue: String(wpm)
+   * });
+   *
+   * // Update stats panel
+   * this.dom.updateMultipleText({
+   *   statsText: `Words: ${wordsRead} / ${totalWords}`,
+   *   progressBar: `${percent}%`
+   * });
+   * ```
    */
   updateMultipleText(updates) {
     Object.entries(updates).forEach(([key, value]) => {
@@ -644,7 +976,28 @@ var DOMRegistry = class {
     });
   }
   /**
-   * Toggle visibility of multiple elements
+   * Toggle visibility of multiple elements (batch visibility)
+   *
+   * Efficiently shows or hides multiple elements using CSS_CLASSES.hidden.
+   * More readable than multiple individual toggleClass() calls.
+   *
+   * @param toggles - Object mapping element keys to visibility booleans (true = visible, false = hidden)
+   *
+   * @example
+   * ```typescript
+   * // Show play button, hide pause button
+   * this.dom.toggleMultipleVisibility({
+   *   playBtn: true,
+   *   pauseBtn: false
+   * });
+   *
+   * // Hide all panels
+   * this.dom.toggleMultipleVisibility({
+   *   controlsEl: false,
+   *   settingsEl: false,
+   *   statsEl: false
+   * });
+   * ```
    */
   toggleMultipleVisibility(toggles) {
     Object.entries(toggles).forEach(([key, visible]) => {
@@ -799,6 +1152,22 @@ function extractEditorContent(app) {
   };
 }
 var AutoLoadManager = class {
+  /**
+   * Creates a new AutoLoadManager instance
+   *
+   * @param app - Obsidian App instance for accessing workspace and editor
+   * @param loadTextCallback - Callback function to load text into DashReader view
+   * @param isViewShown - Function that returns true if DashReader view is currently visible
+   *
+   * @example
+   * ```typescript
+   * this.autoLoadManager = new AutoLoadManager(
+   *   this.app,
+   *   (text, source) => this.loadText(text, source),
+   *   () => this.isViewShown
+   * );
+   * ```
+   */
   constructor(app, loadTextCallback, isViewShown) {
     this.app = app;
     this.loadTextCallback = loadTextCallback;
@@ -812,7 +1181,36 @@ var AutoLoadManager = class {
   }
   /**
    * Check for selection or cursor changes and load text if needed
-   * Includes throttling to avoid excessive checks
+   *
+   * This is the main method called by keyboard and mouse event handlers.
+   * It implements throttling (150ms) to avoid performance issues from
+   * rapid event firing.
+   *
+   * **Logic Flow**:
+   * 1. Throttle: Skip if less than 150ms since last check
+   * 2. Extract editor content (selection, cursor position, etc.)
+   * 3. Priority 1: If selection exists and changed → load selection
+   * 4. Priority 2: If cursor moved → reload from new cursor position
+   *
+   * **Prevents Redundant Loads**:
+   * - Tracks lastSelection to avoid reloading same text
+   * - Tracks lastCursorPosition to avoid reload on unchanged position
+   *
+   * **Typical Usage**: Called on keyup and mouseup events
+   *
+   * @example
+   * ```typescript
+   * // In rsvp-view.ts setupAutoLoad()
+   * this.registerDomEvent(document, 'keyup', (evt) => {
+   *   if (isNavigationKey(evt) || isSelectionKey(evt)) {
+   *     this.autoLoadManager.checkSelectionOrCursor();
+   *   }
+   * });
+   *
+   * this.registerDomEvent(document, 'mouseup', () => {
+   *   this.autoLoadManager.checkSelectionOrCursor();
+   * });
+   * ```
    */
   checkSelectionOrCursor() {
     const now = Date.now();
@@ -870,8 +1268,37 @@ var AutoLoadManager = class {
     }
   }
   /**
-   * Load content from the active editor
-   * Used by file-open and leaf-change events
+   * Load content from the active editor with a configurable delay
+   *
+   * Used by file-open and leaf-change events to load content after a short
+   * delay, giving Obsidian time to fully activate the editor.
+   *
+   * **Priority Logic**:
+   * 1. If text is selected → load selection (rare on file open)
+   * 2. Otherwise → load full document from cursor position
+   *
+   * **Delay Rationale**:
+   * - file-open: 300ms default - editor needs time to initialize
+   * - leaf-change: Can use shorter delay (200ms) - editor already active
+   *
+   * @param delay - Delay in milliseconds before loading (default: 300ms from TIMING.autoLoadDelay)
+   *
+   * @example
+   * ```typescript
+   * // File-open event (use default 300ms delay)
+   * this.registerEvent(
+   *   this.app.workspace.on('file-open', () => {
+   *     this.autoLoadManager.loadFromEditor();
+   *   })
+   * );
+   *
+   * // Leaf-change event (use shorter 200ms delay)
+   * this.registerEvent(
+   *   this.app.workspace.on('active-leaf-change', () => {
+   *     this.autoLoadManager.loadFromEditor(TIMING.autoLoadDelayShort);
+   *   })
+   * );
+   * ```
    */
   loadFromEditor(delay = TIMING.autoLoadDelay) {
     setTimeout(() => {
@@ -904,6 +1331,24 @@ var AutoLoadManager = class {
   }
   /**
    * Reset tracking state for a new file
+   *
+   * Called when the active file changes to clear previous selection and
+   * cursor tracking. This prevents attempting to reload content from the
+   * previous file's state.
+   *
+   * @param filePath - Path of the newly opened file
+   *
+   * @example
+   * ```typescript
+   * this.registerEvent(
+   *   this.app.workspace.on('file-open', (file) => {
+   *     if (file && this.autoLoadManager.hasFileChanged(file.path)) {
+   *       this.autoLoadManager.resetForNewFile(file.path);
+   *       this.autoLoadManager.loadFromEditor();
+   *     }
+   *   })
+   * );
+   * ```
    */
   resetForNewFile(filePath) {
     this.state.lastSelection = "";
@@ -912,12 +1357,42 @@ var AutoLoadManager = class {
   }
   /**
    * Check if the file has changed
+   *
+   * Compares the given file path with the last tracked file path to determine
+   * if the user has switched to a different file.
+   *
+   * @param filePath - File path to check
+   * @returns True if the file path is different from the last tracked path
+   *
+   * @example
+   * ```typescript
+   * if (this.autoLoadManager.hasFileChanged(currentFile.path)) {
+   *   console.log('User switched to a different file');
+   *   this.autoLoadManager.resetForNewFile(currentFile.path);
+   * }
+   * ```
    */
   hasFileChanged(filePath) {
     return filePath !== this.state.lastFilePath;
   }
   /**
    * Get current state (for debugging)
+   *
+   * Returns a readonly copy of the internal state for debugging purposes.
+   * Useful for understanding why auto-load is or isn't triggering.
+   *
+   * @returns Readonly copy of the current AutoLoadState
+   *
+   * @example
+   * ```typescript
+   * const state = this.autoLoadManager.getState();
+   * console.log('AutoLoad state:', {
+   *   lastSelection: state.lastSelection.substring(0, 50) + '...',
+   *   lastFilePath: state.lastFilePath,
+   *   lastCursorPosition: state.lastCursorPosition,
+   *   lastCheckTime: new Date(state.lastCheckTime).toISOString()
+   * });
+   * ```
    */
   getState() {
     return { ...this.state };

@@ -1,7 +1,7 @@
 {
   "id": "dashreader",
   "name": "DashReader",
-  "version": "1.3.1",
+  "version": "1.4.0",
   "minAppVersion": "0.15.0",
   "description": "Speed reading with RSVP (Rapid Serial Visual Presentation) - Read faster, understand better.",
   "author": "inattendu",
