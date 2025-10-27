@@ -19,16 +19,28 @@ Instead of your eyes moving across lines of text, the text comes to you. Each wo
 
 ### Intelligent Pacing
 - **Smart micropauses** based on punctuation, word length, and paragraphs
+  - Sentence punctuation (.,!?): 2.5x delay
+  - Long words (>8 chars): 1.4x delay
+  - Paragraph breaks: 2.5x delay
 - **Heading-aware pauses** - longer pauses before H1 (3x), H2 (2.5x), H3 (2x), etc.
+- **Callout-aware pauses** - visual separator and 2x delay for Obsidian callouts
 - **Progressive acceleration** - gradually increase speed during reading session
+- Default 400 WPM (comfortable range: 400-800 WPM with practice)
 - All multipliers fully configurable
 
 ### Markdown Support
 - Parses markdown syntax (links, bold, italic, code)
 - Reads code block content
-- Supports callouts
+- **Obsidian callouts support** - displays with icons (📝 note, 💡 tip, ⚠️ warning, etc.)
 - **Proportional heading display** - H1 displayed 2x larger, H2 at 1.75x, etc.
 - Visual separators before sections
+
+### Contextual Navigation
+
+- **Breadcrumb navigation** - shows your position in document structure (H1 › H2 › H3)
+- Updates automatically as you read through sections
+- Click any heading/callout in breadcrumb to jump to that section
+- Callouts displayed with their respective icons in breadcrumb
 
 ### Smart Positioning
 - **Click-to-start** - automatically begins reading from cursor position

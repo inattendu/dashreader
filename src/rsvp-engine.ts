@@ -1,4 +1,4 @@
-import { DashReaderSettings, WordChunk } from './types';
+import { DashReaderSettings, WordChunk, HeadingInfo, HeadingContext } from './types';
 
 export class RSVPEngine {
   private words: string[] = [];
@@ -12,6 +12,7 @@ export class RSVPEngine {
   private startWpm: number = 0;
   private pausedTime: number = 0;
   private lastPauseTime: number = 0;
+  private headings: HeadingInfo[] = [];
 
   constructor(
     settings: DashReaderSettings,
@@ -34,6 +35,10 @@ export class RSVPEngine {
 
     this.words = cleaned.split(/\s+/);
     console.log('DashReader Engine: Total words after split:', this.words.length);
+
+    // Extraire les headings avec leur position
+    this.extractHeadings();
+    console.log('DashReader Engine: Extracted', this.headings.length, 'headings');
 
     // Utiliser l'index du mot si fourni (prioritaire)
     if (startWordIndex !== undefined) {
@@ -159,7 +164,8 @@ export class RSVPEngine {
       text,
       index: startIndex,
       delay: this.calculateDelay(text),
-      isEnd: endIndex >= this.words.length
+      isEnd: endIndex >= this.words.length,
+      headingContext: this.getCurrentHeadingContext(startIndex)
     };
   }
 
@@ -208,6 +214,13 @@ export class RSVPEngine {
       multiplier *= headingMultipliers[level] || 2.0;
     }
 
+    // Micropause pour les callouts Obsidian [CALLOUT:type]
+    const calloutMatch = trimmedText.match(/^\[CALLOUT:[\w-]+\]/);
+    if (calloutMatch) {
+      // Pause similaire à un H3 (changement de section important)
+      multiplier *= 2.0;
+    }
+
     // Micropause pour numéros de section (1., 2., I., II., etc.)
     if (/^(\d+\.|[IVXLCDM]+\.|\w\.)/.test(trimmedText)) {
       multiplier *= 2.0;
@@ -236,6 +249,86 @@ export class RSVPEngine {
     }
 
     return baseDelay * multiplier;
+  }
+
+  /**
+   * Extract all headings and callouts from the words array
+   * Headings are marked with [H1], [H2], etc.
+   * Callouts are marked with [CALLOUT:type] by the markdown parser
+   */
+  private extractHeadings(): void {
+    this.headings = [];
+
+    for (let i = 0; i < this.words.length; i++) {
+      const word = this.words[i];
+
+      // Check for regular headings [H1], [H2], etc.
+      const headingMatch = word.match(/^\[H(\d)\](.+)/);
+      if (headingMatch) {
+        const level = parseInt(headingMatch[1]);
+        const text = headingMatch[2];
+
+        this.headings.push({
+          level,
+          text,
+          wordIndex: i
+        });
+        continue;
+      }
+
+      // Check for callouts [CALLOUT:type]Title
+      const calloutMatch = word.match(/^\[CALLOUT:([\w-]+)\](.+)/);
+      if (calloutMatch) {
+        const calloutType = calloutMatch[1];
+        const text = calloutMatch[2];
+
+        this.headings.push({
+          level: 0, // Special level for callouts
+          text,
+          wordIndex: i,
+          calloutType
+        });
+      }
+    }
+  }
+
+  /**
+   * Get the current heading context (breadcrumb) for a given word index
+   * Returns the hierarchical path of headings leading to the current position
+   */
+  private getCurrentHeadingContext(wordIndex: number): HeadingContext {
+    if (this.headings.length === 0) {
+      return { breadcrumb: [], current: null };
+    }
+
+    // Find all headings before or at the current position
+    const relevantHeadings = this.headings.filter(h => h.wordIndex <= wordIndex);
+
+    if (relevantHeadings.length === 0) {
+      return { breadcrumb: [], current: null };
+    }
+
+    // Build hierarchical breadcrumb
+    const breadcrumb: HeadingInfo[] = [];
+    let currentLevel = 0;
+
+    for (const heading of relevantHeadings) {
+      // If this heading is at a lower or equal level than current, reset the breadcrumb up to this level
+      if (heading.level <= currentLevel) {
+        // Remove all headings from this level onwards
+        while (breadcrumb.length > 0 && breadcrumb[breadcrumb.length - 1].level >= heading.level) {
+          breadcrumb.pop();
+        }
+      }
+
+      breadcrumb.push(heading);
+      currentLevel = heading.level;
+    }
+
+    return {
+      breadcrumb,
+      current: breadcrumb[breadcrumb.length - 1] || null
+    };
   }
 
   getProgress(): number {
@@ -329,6 +422,12 @@ export class RSVPEngine {
         const level = parseInt(headingMatch[1]);
         const headingMultipliers = [0, 3.0, 2.5, 2.0, 1.8, 1.5, 1.3];
         multiplier *= headingMultipliers[level] || 2.0;
+      }
+
+      // Micropause pour les callouts Obsidian [CALLOUT:type]
+      const calloutMatch = trimmedText.match(/^\[CALLOUT:[\w-]+\]/);
+      if (calloutMatch) {
+        multiplier *= 2.0;
       }
 
       // Micropause pour numéros de section (1., 2., I., II., etc.)

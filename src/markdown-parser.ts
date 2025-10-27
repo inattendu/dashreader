@@ -47,8 +47,14 @@ export class MarkdownParser {
       return `[H${level}]${content}`;
     });
 
-    // 11. Enlever les callouts Obsidian [!type] mais garder le contenu
-    text = text.replace(/^>\s*\[![\w-]+\].*$/gm, '');
+    // 11. Marquer les callouts Obsidian comme pseudo-headings
+    // > [!type] Titre → [CALLOUT:type]Titre
+    // Garde le contenu des lignes suivantes (gérées par l'étape suivante)
+    text = text.replace(/^>\s*\[!([\w-]+)\]\s*(.*)$/gm, (match, type, title) => {
+      // Si pas de titre, utiliser le type comme titre
+      const displayTitle = title.trim() || type;
+      return `[CALLOUT:${type}]${displayTitle}`;
+    });
 
     // 12. Enlever les blockquotes > (garder le contenu)
     text = text.replace(/^>\s*/gm, '');

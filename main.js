@@ -43,6 +43,7 @@ var RSVPEngine = class {
     this.startWpm = 0;
     this.pausedTime = 0;
     this.lastPauseTime = 0;
+    this.headings = [];
     this.settings = settings;
     this.onWordChange = onWordChange;
     this.onComplete = onComplete;
@@ -52,6 +53,8 @@ var RSVPEngine = class {
     const cleaned = text.replace(/\s+/g, " ").replace(/\n+/g, "\n").trim();
     this.words = cleaned.split(/\s+/);
     console.log("DashReader Engine: Total words after split:", this.words.length);
+    this.extractHeadings();
+    console.log("DashReader Engine: Extracted", this.headings.length, "headings");
     if (startWordIndex !== void 0) {
       this.currentIndex = Math.max(0, Math.min(startWordIndex, this.words.length - 1));
       console.log("DashReader Engine: Starting at word index", this.currentIndex, "/", this.words.length, "(from startWordIndex)");
@@ -152,7 +155,8 @@ var RSVPEngine = class {
       text,
       index: startIndex,
       delay: this.calculateDelay(text),
-      isEnd: endIndex >= this.words.length
+      isEnd: endIndex >= this.words.length,
+      headingContext: this.getCurrentHeadingContext(startIndex)
     };
   }
   getCurrentWpm() {
@@ -182,6 +186,10 @@ var RSVPEngine = class {
       const headingMultipliers = [0, 3, 2.5, 2, 1.8, 1.5, 1.3];
       multiplier *= headingMultipliers[level] || 2;
     }
+    const calloutMatch = trimmedText.match(/^\[CALLOUT:[\w-]+\]/);
+    if (calloutMatch) {
+      multiplier *= 2;
+    }
     if (/^(\d+\.|[IVXLCDM]+\.|\w\.)/.test(trimmedText)) {
       multiplier *= 2;
     }
@@ -200,6 +208,68 @@ var RSVPEngine = class {
       multiplier *= this.settings.micropauseParagraph;
     }
     return baseDelay * multiplier;
+  }
+  /**
+   * Extract all headings and callouts from the words array
+   * Headings are marked with [H1], [H2], etc.
+   * Callouts are marked with [CALLOUT:type] by the markdown parser
+   */
+  extractHeadings() {
+    this.headings = [];
+    for (let i = 0; i < this.words.length; i++) {
+      const word = this.words[i];
+      const headingMatch = word.match(/^\[H(\d)\](.+)/);
+      if (headingMatch) {
+        const level = parseInt(headingMatch[1]);
+        const text = headingMatch[2];
+        this.headings.push({
+          level,
+          text,
+          wordIndex: i
+        });
+        continue;
+      }
+      const calloutMatch = word.match(/^\[CALLOUT:([\w-]+)\](.+)/);
+      if (calloutMatch) {
+        const calloutType = calloutMatch[1];
+        const text = calloutMatch[2];
+        this.headings.push({
+          level: 0,
+          // Special level for callouts
+          text,
+          wordIndex: i,
+          calloutType
+        });
+      }
+    }
+  }
+  /**
+   * Get the current heading context (breadcrumb) for a given word index
+   * Returns the hierarchical path of headings leading to the current position
+   */
+  getCurrentHeadingContext(wordIndex) {
+    if (this.headings.length === 0) {
+      return { breadcrumb: [], current: null };
+    }
+    const relevantHeadings = this.headings.filter((h) => h.wordIndex <= wordIndex);
+    if (relevantHeadings.length === 0) {
+      return { breadcrumb: [], current: null };
+    }
+    const breadcrumb = [];
+    let currentLevel = 0;
+    for (const heading of relevantHeadings) {
+      if (heading.level <= currentLevel) {
+        while (breadcrumb.length > 0 && breadcrumb[breadcrumb.length - 1].level >= heading.level) {
+          breadcrumb.pop();
+        }
+      }
+      breadcrumb.push(heading);
+      currentLevel = heading.level;
+    }
+    return {
+      breadcrumb,
+      current: breadcrumb[breadcrumb.length - 1] || null
+    };
   }
   getProgress() {
     return this.words.length > 0 ? this.currentIndex / this.words.length * 100 : 0;
@@ -263,6 +333,10 @@ var RSVPEngine = class {
         const level = parseInt(headingMatch[1]);
         const headingMultipliers = [0, 3, 2.5, 2, 1.8, 1.5, 1.3];
         multiplier *= headingMultipliers[level] || 2;
+      }
+      const calloutMatch = trimmedText.match(/^\[CALLOUT:[\w-]+\]/);
+      if (calloutMatch) {
+        multiplier *= 2;
       }
       if (/^(\d+\.|[IVXLCDM]+\.|\w\.)/.test(trimmedText)) {
         multiplier *= 2;
@@ -328,7 +402,10 @@ var MarkdownParser = class {
       const level = hashes.length;
       return `[H${level}]${content}`;
     });
-    text = text.replace(/^>\s*\[![\w-]+\].*$/gm, "");
+    text = text.replace(/^>\s*\[!([\w-]+)\]\s*(.*)$/gm, (match, type, title) => {
+      const displayTitle = title.trim() || type;
+      return `[CALLOUT:${type}]${displayTitle}`;
+    });
     text = text.replace(/^>\s*/gm, "");
     text = text.replace(/^[\s]*[-*+]\s+/gm, "");
     text = text.replace(/^[\s]*\d+\.\s+/gm, "");
@@ -1485,10 +1562,11 @@ var DashReaderView = class extends import_obsidian2.ItemView {
    * Orchestrates the construction of all UI components
    * Called once during view initialization
    *
-   * Order matters: toggle bar, stats, display, progress, controls, settings
+   * Order matters: toggle bar, breadcrumb, stats, display, progress, controls, settings
    */
   buildUI() {
     this.buildToggleBar();
+    this.buildBreadcrumb();
     this.buildStats();
     this.buildDisplayArea();
     this.buildProgressBar();
@@ -1513,6 +1591,17 @@ var DashReaderView = class extends import_obsidian2.ItemView {
       onClick: () => this.togglePanel("stats"),
       className: CSS_CLASSES.toggleBtn
     });
+  }
+  /**
+   * Builds the breadcrumb navigation bar
+   * Shows the hierarchical position in the document (H1 > H2 > H3 etc.)
+   * Updated automatically as reading progresses through headings
+   */
+  buildBreadcrumb() {
+    this.breadcrumbEl = this.mainContainerEl.createDiv({
+      cls: "dashreader-breadcrumb"
+    });
+    this.breadcrumbEl.style.display = "none";
   }
   /**
    * Builds the statistics display panel
@@ -1951,16 +2040,26 @@ var DashReaderView = class extends import_obsidian2.ItemView {
    */
   onWordChange(chunk) {
     const headingMatch = chunk.text.match(/^\[H(\d)\]/);
+    const calloutMatch = chunk.text.match(/^\[CALLOUT:([\w-]+)\]/);
     let displayText = chunk.text;
     let headingLevel = 0;
     let showSeparator = false;
+    let calloutType;
     if (headingMatch) {
       headingLevel = parseInt(headingMatch[1]);
       displayText = chunk.text.replace(/^\[H\d\]/, "");
       showSeparator = true;
       console.log("DashReader: Heading detected - Level", headingLevel, "Text:", displayText);
+    } else if (calloutMatch) {
+      calloutType = calloutMatch[1];
+      displayText = chunk.text.replace(/^\[CALLOUT:[\w-]+\]/, "");
+      showSeparator = true;
+      console.log("DashReader: Callout detected - Type", calloutType, "Text:", displayText);
     }
-    this.displayWordWithHeading(displayText, headingLevel, showSeparator);
+    this.displayWordWithHeading(displayText, headingLevel, showSeparator, calloutType);
+    if (chunk.headingContext) {
+      this.updateBreadcrumb(chunk.headingContext);
+    }
     if (this.settings.showContext && this.contextBeforeEl && this.contextAfterEl) {
       const context = this.engine.getContext(this.settings.contextWords);
       this.contextBeforeEl.setText(context.before.join(" "));
@@ -1972,15 +2071,37 @@ var DashReaderView = class extends import_obsidian2.ItemView {
     this.updateStats();
   }
   /**
-   * Displays a word with heading-based font size adjustment
+   * Displays a word with heading or callout-based styling
    *
    * @param word - Word to display
-   * @param headingLevel - Heading level (1-6) or 0 for normal text
-   * @param showSeparator - Whether to show separator line before heading
+   * @param headingLevel - Heading level (1-6) or 0 for normal text/callouts
+   * @param showSeparator - Whether to show separator line before heading/callout
+   * @param calloutType - Callout type (note, abstract, info, etc.) if this is a callout
    */
-  displayWordWithHeading(word, headingLevel, showSeparator = false) {
+  displayWordWithHeading(word, headingLevel, showSeparator = false, calloutType) {
+    const calloutIcons = {
+      note: "\u{1F4DD}",
+      abstract: "\u{1F4C4}",
+      info: "\u2139\uFE0F",
+      tip: "\u{1F4A1}",
+      success: "\u2705",
+      question: "\u2753",
+      warning: "\u26A0\uFE0F",
+      failure: "\u274C",
+      danger: "\u26A1",
+      bug: "\u{1F41B}",
+      example: "\u{1F4CB}",
+      quote: "\u{1F4AC}"
+    };
     let fontSizeMultiplier = 1;
-    if (headingLevel > 0) {
+    let fontWeight = "normal";
+    let prefix = "";
+    if (calloutType) {
+      fontSizeMultiplier = 1.2;
+      fontWeight = "bold";
+      const icon = calloutIcons[calloutType.toLowerCase()] || "\u{1F4CC}";
+      prefix = `<span style="margin-right: 8px; opacity: 0.8;">${icon}</span>`;
+    } else if (headingLevel > 0) {
       const multipliers = [
         0,
         HEADING_MULTIPLIERS.h1,
@@ -1991,14 +2112,15 @@ var DashReaderView = class extends import_obsidian2.ItemView {
         HEADING_MULTIPLIERS.h6
       ];
       fontSizeMultiplier = multipliers[headingLevel] || 1;
+      fontWeight = "bold";
     }
     const adjustedFontSize = this.settings.fontSize * fontSizeMultiplier;
     const processedWord = this.processWord(word);
     const separator = showSeparator ? `<div style="width: 60%; height: 2px; background: var(--text-muted); opacity: 0.4; margin: 0 auto 20px auto;"></div>` : "";
     this.wordEl.innerHTML = `
       ${separator}
-      <div style="font-size: ${adjustedFontSize}px; transition: font-size 0.3s ease; font-weight: ${headingLevel > 0 ? "bold" : "normal"};">
-        ${processedWord}
+      <div style="font-size: ${adjustedFontSize}px; transition: font-size 0.3s ease; font-weight: ${fontWeight};">
+        ${prefix}${processedWord}
       </div>
     `;
   }
@@ -2022,6 +2144,95 @@ var DashReaderView = class extends import_obsidian2.ItemView {
       }
     }
     return result;
+  }
+  /**
+   * Updates the breadcrumb navigation bar with current heading context
+   * Shows hierarchical path (H1 > H2 > H3) and makes it clickable for navigation
+   *
+   * @param context - Current heading context from engine
+   */
+  updateBreadcrumb(context) {
+    if (!context || context.breadcrumb.length === 0) {
+      this.breadcrumbEl.style.display = "none";
+      return;
+    }
+    this.breadcrumbEl.style.display = "block";
+    this.breadcrumbEl.empty();
+    const calloutIcons = {
+      note: "\u{1F4DD}",
+      abstract: "\u{1F4C4}",
+      info: "\u2139\uFE0F",
+      tip: "\u{1F4A1}",
+      success: "\u2705",
+      question: "\u2753",
+      warning: "\u26A0\uFE0F",
+      failure: "\u274C",
+      danger: "\u26A1",
+      bug: "\u{1F41B}",
+      example: "\u{1F4CB}",
+      quote: "\u{1F4AC}"
+    };
+    context.breadcrumb.forEach((heading, index) => {
+      if (index > 0) {
+        const separator = this.breadcrumbEl.createSpan({
+          cls: "dashreader-breadcrumb-separator",
+          text: " \u203A "
+        });
+        separator.style.opacity = "0.5";
+        separator.style.margin = "0 8px";
+      }
+      let displayText = heading.text;
+      if (heading.calloutType) {
+        const icon = calloutIcons[heading.calloutType.toLowerCase()] || "\u{1F4CC}";
+        displayText = `${icon} ${heading.text}`;
+      }
+      const item = this.breadcrumbEl.createSpan({
+        cls: "dashreader-breadcrumb-item",
+        text: displayText
+      });
+      const isLast = index === context.breadcrumb.length - 1;
+      item.style.cursor = "pointer";
+      item.style.opacity = isLast ? "1" : "0.7";
+      item.style.fontWeight = isLast ? "bold" : "normal";
+      if (heading.calloutType) {
+        item.style.fontSize = "14px";
+      } else {
+        item.style.fontSize = `${12 + 2 * (6 - heading.level)}px`;
+      }
+      item.addEventListener("mouseenter", () => {
+        item.style.opacity = "1";
+        item.style.textDecoration = "underline";
+      });
+      item.addEventListener("mouseleave", () => {
+        item.style.opacity = isLast ? "1" : "0.7";
+        item.style.textDecoration = "none";
+      });
+      item.addEventListener("click", () => {
+        this.navigateToHeading(heading.wordIndex);
+      });
+    });
+  }
+  /**
+   * Navigates to a specific heading by word index
+   * Pauses playback, jumps to the heading position, and resumes if it was playing
+   *
+   * @param wordIndex - Word index to navigate to
+   */
+  navigateToHeading(wordIndex) {
+    const wasPlaying = this.engine.getIsPlaying();
+    if (wasPlaying) {
+      this.engine.pause();
+    }
+    const currentIndex = this.engine.getCurrentIndex();
+    const delta = wordIndex - currentIndex;
+    if (delta < 0) {
+      this.engine.rewind(Math.abs(delta));
+    } else if (delta > 0) {
+      this.engine.forward(delta);
+    }
+    if (wasPlaying) {
+      this.engine.play();
+    }
   }
   /**
    * Called by engine when reading is complete
@@ -2253,7 +2464,8 @@ var DashReaderSettingTab = class extends import_obsidian3.PluginSettingTab {
 
 // src/types.ts
 var DEFAULT_SETTINGS = {
-  wpm: 300,
+  wpm: 400,
+  // Increased from 300 (inspired by Stutter: 400-800 range)
   chunkSize: 1,
   fontSize: 48,
   highlightColor: "#4a9eff",
@@ -2263,9 +2475,12 @@ var DEFAULT_SETTINGS = {
   showContext: true,
   contextWords: 3,
   enableMicropause: true,
-  micropausePunctuation: 1.5,
-  micropauseLongWords: 1.3,
-  micropauseParagraph: 2,
+  micropausePunctuation: 2.5,
+  // Increased from 1.5 (Stutter: 2.5 for sentences)
+  micropauseLongWords: 1.4,
+  // Increased from 1.3 (Stutter: 1.4)
+  micropauseParagraph: 2.5,
+  // Increased from 2.0 for better section separation
   autoStart: false,
   autoStartDelay: 3,
   showProgress: true,
@@ -2278,7 +2493,8 @@ var DEFAULT_SETTINGS = {
   hotkeyQuit: "Escape",
   enableAcceleration: false,
   accelerationDuration: 30,
-  accelerationTargetWpm: 450
+  accelerationTargetWpm: 600
+  // Increased from 450 (Stutter suggests 600-800)
 };
 
 // main.ts

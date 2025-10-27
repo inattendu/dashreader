@@ -43,6 +43,32 @@
   transform: scale(1.1);
 }
 
+/* ===== BREADCRUMB NAVIGATION ===== */
+.dashreader-breadcrumb {
+  padding: 12px 20px;
+  background: var(--background-secondary);
+  border-bottom: 1px solid var(--background-modifier-border);
+  font-size: 14px;
+  color: var(--text-muted);
+  overflow-x: auto;
+  white-space: nowrap;
+  scrollbar-width: thin;
+}
+
+.dashreader-breadcrumb-item {
+  display: inline-block;
+  transition: all 0.2s ease;
+}
+
+.dashreader-breadcrumb-item:hover {
+  color: var(--text-normal);
+}
+
+.dashreader-breadcrumb-separator {
+  display: inline-block;
+  user-select: none;
+}
+
 /* ===== STATS (Cachées par défaut) ===== */
 .dashreader-stats {
   padding: 16px 20px;

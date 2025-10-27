@@ -54,7 +54,7 @@
 
 import { ItemView, WorkspaceLeaf, MarkdownView } from 'obsidian';
 import { RSVPEngine } from './rsvp-engine';
-import { DashReaderSettings, WordChunk } from './types';
+import { DashReaderSettings, WordChunk, HeadingContext } from './types';
 import { MarkdownParser } from './markdown-parser';
 import { ViewState } from './view-state';
 import { DOMRegistry } from './dom-registry';
@@ -150,6 +150,9 @@ export class DashReaderView extends ItemView {
 
   /** Acceleration target WPM control group (shown conditionally) */
   private accelTargetGroup: HTMLElement;
+
+  /** Breadcrumb navigation showing current heading context */
+  private breadcrumbEl: HTMLElement;
 
   // ──────────────────────────────────────────────────────────────────────
   // Constructor
@@ -250,10 +253,11 @@ export class DashReaderView extends ItemView {
    * Orchestrates the construction of all UI components
    * Called once during view initialization
    *
-   * Order matters: toggle bar, stats, display, progress, controls, settings
+   * Order matters: toggle bar, breadcrumb, stats, display, progress, controls, settings
    */
   private buildUI(): void {
     this.buildToggleBar();
+    this.buildBreadcrumb();
     this.buildStats();
     this.buildDisplayArea();
     this.buildProgressBar();
@@ -281,6 +285,19 @@ export class DashReaderView extends ItemView {
       onClick: () => this.togglePanel('stats'),
       className: CSS_CLASSES.toggleBtn,
     });
+  }
+
+  /**
+   * Builds the breadcrumb navigation bar
+   * Shows the hierarchical position in the document (H1 > H2 > H3 etc.)
+   * Updated automatically as reading progresses through headings
+   */
+  private buildBreadcrumb(): void {
+    this.breadcrumbEl = this.mainContainerEl.createDiv({
+      cls: 'dashreader-breadcrumb'
+    });
+    // Initially empty, will be populated by updateBreadcrumb()
+    this.breadcrumbEl.style.display = 'none'; // Hidden until we have content
   }
 
   /**
@@ -794,18 +811,32 @@ export class DashReaderView extends ItemView {
   private onWordChange(chunk: WordChunk): void {
     // Detect heading markers [H1], [H2], etc.
     const headingMatch = chunk.text.match(/^\[H(\d)\]/);
+    // Detect callout markers [CALLOUT:type]
+    const calloutMatch = chunk.text.match(/^\[CALLOUT:([\w-]+)\]/);
+
     let displayText = chunk.text;
     let headingLevel = 0;
     let showSeparator = false;
+    let calloutType: string | undefined;
 
     if (headingMatch) {
       headingLevel = parseInt(headingMatch[1]);
       displayText = chunk.text.replace(/^\[H\d\]/, '');
       showSeparator = true;
       console.log('DashReader: Heading detected - Level', headingLevel, 'Text:', displayText);
+    } else if (calloutMatch) {
+      calloutType = calloutMatch[1];
+      displayText = chunk.text.replace(/^\[CALLOUT:[\w-]+\]/, '');
+      showSeparator = true;
+      console.log('DashReader: Callout detected - Type', calloutType, 'Text:', displayText);
     }
 
-    this.displayWordWithHeading(displayText, headingLevel, showSeparator);
+    this.displayWordWithHeading(displayText, headingLevel, showSeparator, calloutType);
+
+    // Update breadcrumb navigation
+    if (chunk.headingContext) {
+      this.updateBreadcrumb(chunk.headingContext);
+    }
 
     // Update context
     if (this.settings.showContext && this.contextBeforeEl && this.contextAfterEl) {
@@ -824,16 +855,43 @@ export class DashReaderView extends ItemView {
   }
 
   /**
-   * Displays a word with heading-based font size adjustment
+   * Displays a word with heading or callout-based styling
    *
    * @param word - Word to display
-   * @param headingLevel - Heading level (1-6) or 0 for normal text
-   * @param showSeparator - Whether to show separator line before heading
+   * @param headingLevel - Heading level (1-6) or 0 for normal text/callouts
+   * @param showSeparator - Whether to show separator line before heading/callout
+   * @param calloutType - Callout type (note, abstract, info, etc.) if this is a callout
    */
-  private displayWordWithHeading(word: string, headingLevel: number, showSeparator: boolean = false): void {
-    // Calculate font size based on heading level
+  private displayWordWithHeading(word: string, headingLevel: number, showSeparator: boolean = false, calloutType?: string): void {
+    // Callout icon mapping
+    const calloutIcons: Record<string, string> = {
+      note: '📝',
+      abstract: '📄',
+      info: 'ℹ️',
+      tip: '💡',
+      success: '✅',
+      question: '❓',
+      warning: '⚠️',
+      failure: '❌',
+      danger: '⚡',
+      bug: '🐛',
+      example: '📋',
+      quote: '💬'
+    };
+
+    // Calculate font size based on heading level or callout
     let fontSizeMultiplier = 1.0;
-    if (headingLevel > 0) {
+    let fontWeight = 'normal';
+    let prefix = '';
+
+    if (calloutType) {
+      // Callouts: slightly larger font, with icon prefix
+      fontSizeMultiplier = 1.2;
+      fontWeight = 'bold';
+      const icon = calloutIcons[calloutType.toLowerCase()] || '📌';
+      prefix = `<span style="margin-right: 8px; opacity: 0.8;">${icon}</span>`;
+    } else if (headingLevel > 0) {
+      // Headings: size based on level
       const multipliers = [
         0,
         HEADING_MULTIPLIERS.h1,
@@ -844,6 +902,7 @@ export class DashReaderView extends ItemView {
         HEADING_MULTIPLIERS.h6
       ];
       fontSizeMultiplier = multipliers[headingLevel] || 1.0;
+      fontWeight = 'bold';
     }
 
     const adjustedFontSize = this.settings.fontSize * fontSizeMultiplier;
@@ -855,8 +914,8 @@ export class DashReaderView extends ItemView {
 
     this.wordEl.innerHTML = `
       ${separator}
-      <div style="font-size: ${adjustedFontSize}px; transition: font-size 0.3s ease; font-weight: ${headingLevel > 0 ? 'bold' : 'normal'};">
-        ${processedWord}
+      <div style="font-size: ${adjustedFontSize}px; transition: font-size 0.3s ease; font-weight: ${fontWeight};">
+        ${prefix}${processedWord}
       </div>
     `;
   }
@@ -884,6 +943,122 @@ export class DashReaderView extends ItemView {
     }
 
     return result;
+  }
+
+  /**
+   * Updates the breadcrumb navigation bar with current heading context
+   * Shows hierarchical path (H1 > H2 > H3) and makes it clickable for navigation
+   *
+   * @param context - Current heading context from engine
+   */
+  private updateBreadcrumb(context: HeadingContext): void {
+    if (!context || context.breadcrumb.length === 0) {
+      // No headings, hide breadcrumb
+      this.breadcrumbEl.style.display = 'none';
+      return;
+    }
+
+    // Show breadcrumb
+    this.breadcrumbEl.style.display = 'block';
+    this.breadcrumbEl.empty();
+
+    // Callout icon mapping (same as displayWordWithHeading)
+    const calloutIcons: Record<string, string> = {
+      note: '📝',
+      abstract: '📄',
+      info: 'ℹ️',
+      tip: '💡',
+      success: '✅',
+      question: '❓',
+      warning: '⚠️',
+      failure: '❌',
+      danger: '⚡',
+      bug: '🐛',
+      example: '📋',
+      quote: '💬'
+    };
+
+    // Build breadcrumb items
+    context.breadcrumb.forEach((heading, index) => {
+      // Add separator if not first item
+      if (index > 0) {
+        const separator = this.breadcrumbEl.createSpan({
+          cls: 'dashreader-breadcrumb-separator',
+          text: ' › '
+        });
+        separator.style.opacity = '0.5';
+        separator.style.margin = '0 8px';
+      }
+
+      // Determine display text with icon for callouts
+      let displayText = heading.text;
+      if (heading.calloutType) {
+        const icon = calloutIcons[heading.calloutType.toLowerCase()] || '📌';
+        displayText = `${icon} ${heading.text}`;
+      }
+
+      // Create breadcrumb item
+      const item = this.breadcrumbEl.createSpan({
+        cls: 'dashreader-breadcrumb-item',
+        text: displayText
+      });
+
+      // Style the item
+      const isLast = index === context.breadcrumb.length - 1;
+      item.style.cursor = 'pointer';
+      item.style.opacity = isLast ? '1' : '0.7';
+      item.style.fontWeight = isLast ? 'bold' : 'normal';
+
+      // Font size: larger for higher-level headings, medium for callouts
+      if (heading.calloutType) {
+        item.style.fontSize = '14px'; // Callouts: consistent size
+      } else {
+        item.style.fontSize = `${12 + (2 * (6 - heading.level))}px`; // Headings: size by level
+      }
+
+      // Add hover effect
+      item.addEventListener('mouseenter', () => {
+        item.style.opacity = '1';
+        item.style.textDecoration = 'underline';
+      });
+      item.addEventListener('mouseleave', () => {
+        item.style.opacity = isLast ? '1' : '0.7';
+        item.style.textDecoration = 'none';
+      });
+
+      // Make it clickable to navigate
+      item.addEventListener('click', () => {
+        this.navigateToHeading(heading.wordIndex);
+      });
+    });
+  }
+
+  /**
+   * Navigates to a specific heading by word index
+   * Pauses playback, jumps to the heading position, and resumes if it was playing
+   *
+   * @param wordIndex - Word index to navigate to
+   */
+  private navigateToHeading(wordIndex: number): void {
+    const wasPlaying = this.engine.getIsPlaying();
+
+    if (wasPlaying) {
+      this.engine.pause();
+    }
+
+    // Use the engine's jump functionality (via rewind/forward)
+    const currentIndex = this.engine.getCurrentIndex();
+    const delta = wordIndex - currentIndex;
+
+    if (delta < 0) {
+      this.engine.rewind(Math.abs(delta));
+    } else if (delta > 0) {
+      this.engine.forward(delta);
+    }
+
+    if (wasPlaying) {
+      this.engine.play();
+    }
   }
 
   /**
