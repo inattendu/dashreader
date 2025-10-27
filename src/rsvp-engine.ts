@@ -275,6 +275,9 @@ export class RSVPEngine {
    * Extract all headings and callouts from the words array
    * Headings are marked with [H1], [H2], etc.
    * Callouts are marked with [CALLOUT:type] by the markdown parser
+   *
+   * Since text is split into words, we need to collect all words
+   * that belong to the same heading/callout title.
    */
   private extractHeadings(): void {
     this.headings = [];
@@ -286,7 +289,37 @@ export class RSVPEngine {
       const headingMatch = word.match(/^\[H(\d)\](.+)/);
       if (headingMatch) {
         const level = parseInt(headingMatch[1]);
-        const text = headingMatch[2];
+        const firstWord = headingMatch[2];
+
+        // Collect following words until we hit a marker or line break
+        const titleWords = [firstWord];
+        let j = i + 1;
+        while (j < this.words.length) {
+          const nextWord = this.words[j];
+
+          // Stop if we hit another marker
+          if (/^\[H\d\]/.test(nextWord) || /^\[CALLOUT:/.test(nextWord)) {
+            break;
+          }
+
+          // Stop if we hit a paragraph break
+          if (nextWord.includes('\n')) {
+            // Include this word but stop after
+            titleWords.push(nextWord.replace(/\n/g, ' ').trim());
+            break;
+          }
+
+          // Add word to title
+          titleWords.push(nextWord);
+          j++;
+
+          // Safety limit: max 20 words for a heading
+          if (titleWords.length >= 20) {
+            break;
+          }
+        }
+
+        const text = titleWords.join(' ').trim();
 
         this.headings.push({
           level,
@@ -300,7 +333,36 @@ export class RSVPEngine {
       const calloutMatch = word.match(/^\[CALLOUT:([\w-]+)\](.+)/);
       if (calloutMatch) {
         const calloutType = calloutMatch[1];
-        const text = calloutMatch[2];
+        const firstWord = calloutMatch[2];
+
+        // Collect following words until we hit a marker or line break
+        const titleWords = [firstWord];
+        let j = i + 1;
+        while (j < this.words.length) {
+          const nextWord = this.words[j];
+
+          // Stop if we hit another marker
+          if (/^\[H\d\]/.test(nextWord) || /^\[CALLOUT:/.test(nextWord)) {
+            break;
+          }
+
+          // Stop if we hit a paragraph break
+          if (nextWord.includes('\n')) {
+            titleWords.push(nextWord.replace(/\n/g, ' ').trim());
+            break;
+          }
+
+          // Add word to title
+          titleWords.push(nextWord);
+          j++;
+
+          // Safety limit: max 20 words for a callout title
+          if (titleWords.length >= 20) {
+            break;
+          }
+        }
+
+        const text = titleWords.join(' ').trim();
 
         this.headings.push({
           level: 0, // Special level for callouts

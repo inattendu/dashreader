@@ -226,6 +226,9 @@ var RSVPEngine = class {
    * Extract all headings and callouts from the words array
    * Headings are marked with [H1], [H2], etc.
    * Callouts are marked with [CALLOUT:type] by the markdown parser
+   *
+   * Since text is split into words, we need to collect all words
+   * that belong to the same heading/callout title.
    */
   extractHeadings() {
     this.headings = [];
@@ -234,7 +237,25 @@ var RSVPEngine = class {
       const headingMatch = word.match(/^\[H(\d)\](.+)/);
       if (headingMatch) {
         const level = parseInt(headingMatch[1]);
-        const text = headingMatch[2];
+        const firstWord = headingMatch[2];
+        const titleWords = [firstWord];
+        let j = i + 1;
+        while (j < this.words.length) {
+          const nextWord = this.words[j];
+          if (/^\[H\d\]/.test(nextWord) || /^\[CALLOUT:/.test(nextWord)) {
+            break;
+          }
+          if (nextWord.includes("\n")) {
+            titleWords.push(nextWord.replace(/\n/g, " ").trim());
+            break;
+          }
+          titleWords.push(nextWord);
+          j++;
+          if (titleWords.length >= 20) {
+            break;
+          }
+        }
+        const text = titleWords.join(" ").trim();
         this.headings.push({
           level,
           text,
@@ -245,7 +266,25 @@ var RSVPEngine = class {
       const calloutMatch = word.match(/^\[CALLOUT:([\w-]+)\](.+)/);
       if (calloutMatch) {
         const calloutType = calloutMatch[1];
-        const text = calloutMatch[2];
+        const firstWord = calloutMatch[2];
+        const titleWords = [firstWord];
+        let j = i + 1;
+        while (j < this.words.length) {
+          const nextWord = this.words[j];
+          if (/^\[H\d\]/.test(nextWord) || /^\[CALLOUT:/.test(nextWord)) {
+            break;
+          }
+          if (nextWord.includes("\n")) {
+            titleWords.push(nextWord.replace(/\n/g, " ").trim());
+            break;
+          }
+          titleWords.push(nextWord);
+          j++;
+          if (titleWords.length >= 20) {
+            break;
+          }
+        }
+        const text = titleWords.join(" ").trim();
         this.headings.push({
           level: 0,
           // Special level for callouts
@@ -2528,6 +2567,29 @@ var DashReaderView = class extends import_obsidian2.ItemView {
     this.dom.updateText("statsText", `${wordInfo} loaded${fileInfo} - ~${durationText} - Shift+Space to start`);
     this.wordEl.innerHTML = createReadyMessage(remainingWords, totalWords, wordIndexFromCursor, durationText, sourceInfo);
     console.log("DashReader: Words to read:", remainingWords, "out of", totalWords);
+    const allHeadings = this.engine.getHeadings();
+    if (allHeadings.length > 0) {
+      const startIndex = wordIndexFromCursor != null ? wordIndexFromCursor : 0;
+      const relevantHeadings = allHeadings.filter((h) => h.wordIndex <= startIndex);
+      if (relevantHeadings.length > 0) {
+        const breadcrumb = [];
+        let currentLevel = 0;
+        for (const heading of relevantHeadings) {
+          if (heading.level <= currentLevel) {
+            while (breadcrumb.length > 0 && breadcrumb[breadcrumb.length - 1].level >= heading.level) {
+              breadcrumb.pop();
+            }
+          }
+          breadcrumb.push(heading);
+          currentLevel = heading.level;
+        }
+        const initialContext = {
+          breadcrumb,
+          current: breadcrumb[breadcrumb.length - 1] || null
+        };
+        this.updateBreadcrumb(initialContext);
+      }
+    }
     if (this.settings.autoStart) {
       setTimeout(() => {
         this.engine.play();

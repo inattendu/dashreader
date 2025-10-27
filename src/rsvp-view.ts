@@ -1418,6 +1418,37 @@ export class DashReaderView extends ItemView {
 
     console.log('DashReader: Words to read:', remainingWords, 'out of', totalWords);
 
+    // Display initial breadcrumb (before starting reading)
+    const allHeadings = this.engine.getHeadings();
+    if (allHeadings.length > 0) {
+      // Get the initial heading context based on starting position
+      const startIndex = wordIndexFromCursor ?? 0;
+      const relevantHeadings = allHeadings.filter(h => h.wordIndex <= startIndex);
+
+      if (relevantHeadings.length > 0) {
+        // Build hierarchical breadcrumb
+        const breadcrumb: HeadingInfo[] = [];
+        let currentLevel = 0;
+
+        for (const heading of relevantHeadings) {
+          if (heading.level <= currentLevel) {
+            while (breadcrumb.length > 0 && breadcrumb[breadcrumb.length - 1].level >= heading.level) {
+              breadcrumb.pop();
+            }
+          }
+          breadcrumb.push(heading);
+          currentLevel = heading.level;
+        }
+
+        const initialContext: HeadingContext = {
+          breadcrumb,
+          current: breadcrumb[breadcrumb.length - 1] || null
+        };
+
+        this.updateBreadcrumb(initialContext);
+      }
+    }
+
     // Auto-start if enabled
     if (this.settings.autoStart) {
       setTimeout(() => {
