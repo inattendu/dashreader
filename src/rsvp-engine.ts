@@ -520,4 +520,12 @@ export class RSVPEngine {
     // Méthode publique pour obtenir le WPM actuel (pour affichage)
     return this.getCurrentWpm();
   }
+
+  /**
+   * Returns all headings extracted from the document
+   * Useful for navigation and section counting
+   */
+  getHeadings(): HeadingInfo[] {
+    return this.headings;
+  }
 }

@@ -55,7 +55,7 @@
 
 import { ItemView, WorkspaceLeaf, MarkdownView } from 'obsidian';
 import { RSVPEngine } from './rsvp-engine';
-import { DashReaderSettings, WordChunk, HeadingContext } from './types';
+import { DashReaderSettings, WordChunk, HeadingContext, HeadingInfo } from './types';
 import { MarkdownParser } from './markdown-parser';
 import { ViewState } from './view-state';
 import { DOMRegistry } from './dom-registry';
@@ -989,8 +989,72 @@ export class DashReaderView extends ItemView {
     }
 
     // Show breadcrumb
-    this.breadcrumbEl.style.display = 'block';
+    this.breadcrumbEl.style.display = 'flex';
+    this.breadcrumbEl.style.flexDirection = 'column';
+    this.breadcrumbEl.style.gap = '8px';
     this.breadcrumbEl.empty();
+
+    // === PROGRESS INDICATORS CONTAINER ===
+    const progressContainer = this.breadcrumbEl.createDiv({
+      cls: 'dashreader-breadcrumb-progress'
+    });
+    progressContainer.style.display = 'flex';
+    progressContainer.style.alignItems = 'center';
+    progressContainer.style.gap = '12px';
+    progressContainer.style.fontSize = '12px';
+    progressContainer.style.color = 'var(--text-muted)';
+    progressContainer.style.fontWeight = 'bold';
+
+    // Calculate section progress (based on H1 headings)
+    const allHeadings = this.engine.getHeadings();
+    const allH1s = allHeadings.filter(h => h.level === 1);
+    const currentIndex = this.engine.getCurrentIndex();
+
+    // Find current section (which H1 are we in?)
+    let currentSectionIndex = 0;
+    for (let i = 0; i < allH1s.length; i++) {
+      if (allH1s[i].wordIndex <= currentIndex) {
+        currentSectionIndex = i + 1;
+      } else {
+        break;
+      }
+    }
+
+    // Get progress percentage
+    const totalWords = this.engine.getTotalWords();
+    const progressPercent = totalWords > 0 ? (currentIndex / totalWords) * 100 : 0;
+
+    // Section counter (if we have H1s)
+    if (allH1s.length > 0 && currentSectionIndex > 0) {
+      const sectionCounter = progressContainer.createSpan({
+        text: `Section ${currentSectionIndex}/${allH1s.length}`,
+        cls: 'dashreader-section-counter'
+      });
+      sectionCounter.style.opacity = '0.8';
+    }
+
+    // Visual progress bar
+    const barWidth = 10; // Total blocks
+    const filledBlocks = Math.round((progressPercent / 100) * barWidth);
+    const emptyBlocks = barWidth - filledBlocks;
+    const progressBar = '█'.repeat(filledBlocks) + '░'.repeat(emptyBlocks);
+
+    const barSpan = progressContainer.createSpan({
+      text: `[${progressBar}] ${Math.round(progressPercent)}%`,
+      cls: 'dashreader-progress-bar'
+    });
+    barSpan.style.fontFamily = 'monospace';
+    barSpan.style.letterSpacing = '0px';
+    barSpan.style.opacity = '0.7';
+
+    // === BREADCRUMB PATH CONTAINER ===
+    const breadcrumbPath = this.breadcrumbEl.createDiv({
+      cls: 'dashreader-breadcrumb-path'
+    });
+    breadcrumbPath.style.display = 'flex';
+    breadcrumbPath.style.flexWrap = 'wrap';
+    breadcrumbPath.style.gap = '4px';
+    breadcrumbPath.style.alignItems = 'center';
 
     // Callout icon mapping (same as displayWordWithHeading)
     const calloutIcons: Record<string, string> = {
@@ -1012,12 +1076,13 @@ export class DashReaderView extends ItemView {
     context.breadcrumb.forEach((heading, index) => {
       // Add separator if not first item
       if (index > 0) {
-        const separator = this.breadcrumbEl.createSpan({
+        const separator = breadcrumbPath.createSpan({
           cls: 'dashreader-breadcrumb-separator',
           text: ' › '
         });
         separator.style.opacity = '0.5';
-        separator.style.margin = '0 8px';
+        separator.style.margin = '0 4px';
+        separator.style.flexShrink = '0';
       }
 
       // Determine display text with icon for callouts
@@ -1027,17 +1092,27 @@ export class DashReaderView extends ItemView {
         displayText = `${icon} ${heading.text}`;
       }
 
-      // Create breadcrumb item
-      const item = this.breadcrumbEl.createSpan({
+      // Create breadcrumb item container (text + dropdown button)
+      const itemContainer = breadcrumbPath.createSpan({
+        cls: 'dashreader-breadcrumb-item-container'
+      });
+      itemContainer.style.display = 'inline-flex';
+      itemContainer.style.alignItems = 'center';
+      itemContainer.style.gap = '4px';
+
+      // Create breadcrumb item text
+      const item = itemContainer.createSpan({
         cls: 'dashreader-breadcrumb-item',
         text: displayText
       });
 
-      // Style the item
+      // Style the item - allow full text display with wrapping
       const isLast = index === context.breadcrumb.length - 1;
       item.style.cursor = 'pointer';
       item.style.opacity = isLast ? '1' : '0.7';
       item.style.fontWeight = isLast ? 'bold' : 'normal';
+      item.style.whiteSpace = 'normal'; // Allow wrapping for long titles
+      item.style.wordBreak = 'break-word';
 
       // Font size: larger for higher-level headings, medium for callouts
       if (heading.calloutType) {
@@ -1060,7 +1135,132 @@ export class DashReaderView extends ItemView {
       item.addEventListener('click', () => {
         this.navigateToHeading(heading.wordIndex);
       });
+
+      // Add dropdown button for navigation
+      const dropdown = itemContainer.createSpan({
+        cls: 'dashreader-breadcrumb-dropdown',
+        text: '▼'
+      });
+      dropdown.style.cursor = 'pointer';
+      dropdown.style.opacity = '0.4';
+      dropdown.style.fontSize = '10px';
+      dropdown.style.padding = '2px 4px';
+      dropdown.style.borderRadius = '3px';
+      dropdown.style.transition = 'all 0.2s';
+
+      dropdown.addEventListener('mouseenter', () => {
+        dropdown.style.opacity = '1';
+        dropdown.style.backgroundColor = 'var(--background-modifier-hover)';
+      });
+      dropdown.addEventListener('mouseleave', () => {
+        dropdown.style.opacity = '0.4';
+        dropdown.style.backgroundColor = 'transparent';
+      });
+
+      dropdown.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.showHeadingMenu(heading, dropdown);
+      });
     });
+  }
+
+  /**
+   * Shows a dropdown menu with all headings of the same level for navigation
+   * @param currentHeading - The heading that was clicked
+   * @param anchorEl - The element to position the menu relative to
+   */
+  private showHeadingMenu(currentHeading: HeadingInfo, anchorEl: HTMLElement): void {
+    // Get all headings of the same level
+    const allHeadings = this.engine.getHeadings();
+    const sameLevelHeadings = allHeadings.filter(h => h.level === currentHeading.level);
+
+    if (sameLevelHeadings.length <= 1) {
+      // No other headings of this level, nothing to navigate to
+      return;
+    }
+
+    // Create menu
+    const menu = this.contentEl.createDiv({
+      cls: 'dashreader-heading-menu'
+    });
+
+    // Position it near the anchor element
+    const rect = anchorEl.getBoundingClientRect();
+    menu.style.position = 'fixed';
+    menu.style.top = `${rect.bottom + 5}px`;
+    menu.style.left = `${rect.left}px`;
+    menu.style.zIndex = '1000';
+    menu.style.backgroundColor = 'var(--background-primary)';
+    menu.style.border = '1px solid var(--background-modifier-border)';
+    menu.style.borderRadius = '4px';
+    menu.style.padding = '4px';
+    menu.style.maxHeight = '300px';
+    menu.style.overflowY = 'auto';
+    menu.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.15)';
+    menu.style.minWidth = '200px';
+
+    // Add menu items
+    sameLevelHeadings.forEach((heading, index) => {
+      const isCurrent = heading.wordIndex === currentHeading.wordIndex;
+
+      const menuItem = menu.createDiv({
+        cls: 'dashreader-heading-menu-item'
+      });
+      menuItem.style.padding = '6px 12px';
+      menuItem.style.cursor = 'pointer';
+      menuItem.style.fontSize = '13px';
+      menuItem.style.borderRadius = '3px';
+      menuItem.style.display = 'flex';
+      menuItem.style.alignItems = 'center';
+      menuItem.style.gap = '8px';
+
+      if (isCurrent) {
+        menuItem.style.backgroundColor = 'var(--background-modifier-hover)';
+        menuItem.style.fontWeight = 'bold';
+      }
+
+      // Add number
+      const number = menuItem.createSpan({
+        text: `${index + 1}.`
+      });
+      number.style.opacity = '0.6';
+      number.style.minWidth = '25px';
+
+      // Add heading text
+      const text = menuItem.createSpan({
+        text: heading.text
+      });
+      text.style.flex = '1';
+
+      // Hover effect
+      if (!isCurrent) {
+        menuItem.addEventListener('mouseenter', () => {
+          menuItem.style.backgroundColor = 'var(--background-modifier-hover)';
+        });
+        menuItem.addEventListener('mouseleave', () => {
+          menuItem.style.backgroundColor = 'transparent';
+        });
+      }
+
+      // Click to navigate
+      menuItem.addEventListener('click', () => {
+        this.navigateToHeading(heading.wordIndex);
+        menu.remove();
+      });
+    });
+
+    // Close menu when clicking outside
+    const closeMenu = (e: MouseEvent) => {
+      if (!menu.contains(e.target as Node)) {
+        menu.remove();
+        document.removeEventListener('click', closeMenu);
+      }
+    };
+
+    // Delay adding the listener to avoid immediate close from the current click
+    setTimeout(() => {
+      document.addEventListener('click', closeMenu);
+    }, 10);
   }
 
   /**
