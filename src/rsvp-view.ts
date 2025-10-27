@@ -25,7 +25,8 @@
  * ├─ 4. USER INTERACTIONS
  * │  ├─ changeValue() - Unified value changes
  * │  ├─ togglePanel() - Panel visibility
- * │  └─ toggleContextDisplay()
+ * │  ├─ toggleContextDisplay()
+ * │  └─ openInNewTab() - Open in fullscreen tab
  * ├─ 5. AUTO-LOAD SYSTEM
  * │  └─ setupAutoLoad() - Event registration
  * ├─ 6. HOTKEYS & KEYBOARD
@@ -283,6 +284,13 @@ export class DashReaderView extends ItemView {
       icon: ICONS.stats,
       title: 'Toggle stats (S)',
       onClick: () => this.togglePanel('stats'),
+      className: CSS_CLASSES.toggleBtn,
+    });
+
+    createButton(this.toggleBar, {
+      icon: ICONS.expand,
+      title: 'Open in new tab',
+      onClick: () => this.openInNewTab(),
       className: CSS_CLASSES.toggleBtn,
     });
   }
@@ -633,6 +641,28 @@ export class DashReaderView extends ItemView {
     }
     if (this.contextAfterEl) {
       this.contextAfterEl.style.display = display;
+    }
+  }
+
+  /**
+   * Opens DashReader in a new tab (fullscreen-like experience)
+   * Creates a new leaf/tab and transfers the current reading session to it
+   */
+  private async openInNewTab(): Promise<void> {
+    const { workspace } = this.app;
+
+    // Create a new tab
+    const newLeaf = workspace.getLeaf('tab');
+
+    if (newLeaf) {
+      // Open DashReader view in the new tab
+      await newLeaf.setViewState({
+        type: VIEW_TYPE_DASHREADER,
+        active: true,
+      });
+
+      // Reveal the new tab
+      workspace.revealLeaf(newLeaf);
     }
   }
 

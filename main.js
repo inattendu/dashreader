@@ -787,7 +787,9 @@ var ICONS = {
   /** Celebration (reading complete) */
   celebration: "\u{1F389}",
   /** Book/reading indicator */
-  book: "\u{1F4D6}"
+  book: "\u{1F4D6}",
+  /** Expand to new tab */
+  expand: "\u2922"
 };
 var HEADING_MULTIPLIERS = {
   /** H1 heading multiplier (2x base font = major section) */
@@ -1607,6 +1609,12 @@ var DashReaderView = class extends import_obsidian2.ItemView {
       onClick: () => this.togglePanel("stats"),
       className: CSS_CLASSES.toggleBtn
     });
+    createButton(this.toggleBar, {
+      icon: ICONS.expand,
+      title: "Open in new tab",
+      onClick: () => this.openInNewTab(),
+      className: CSS_CLASSES.toggleBtn
+    });
   }
   /**
    * Builds the breadcrumb navigation bar
@@ -1903,6 +1911,21 @@ var DashReaderView = class extends import_obsidian2.ItemView {
     }
     if (this.contextAfterEl) {
       this.contextAfterEl.style.display = display;
+    }
+  }
+  /**
+   * Opens DashReader in a new tab (fullscreen-like experience)
+   * Creates a new leaf/tab and transfers the current reading session to it
+   */
+  async openInNewTab() {
+    const { workspace } = this.app;
+    const newLeaf = workspace.getLeaf("tab");
+    if (newLeaf) {
+      await newLeaf.setViewState({
+        type: VIEW_TYPE_DASHREADER,
+        active: true
+      });
+      workspace.revealLeaf(newLeaf);
     }
   }
   // ============================================================================

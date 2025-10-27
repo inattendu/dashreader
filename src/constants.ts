@@ -247,6 +247,8 @@ export const ICONS = {
   celebration: '🎉',
   /** Book/reading indicator */
   book: '📖',
+  /** Expand to new tab */
+  expand: '⤢',
 } as const;
 
 // ============================================================================
