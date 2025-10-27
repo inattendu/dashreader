@@ -147,13 +147,15 @@ export class RSVPEngine {
 
     let delay = this.calculateDelay(chunk.text);
 
-    // Slow start: gradually increase speed over first 5 words
+    // Slow start: gradually increase speed over first 5 words (if enabled)
     // Inspired by Stutter: ease into reading to avoid jarring start
-    const SLOW_START_WORDS = 5;
-    if (this.wordsReadInSession < SLOW_START_WORDS) {
-      const remainingSlowWords = SLOW_START_WORDS - this.wordsReadInSession;
-      const slowStartMultiplier = 1 + (remainingSlowWords / SLOW_START_WORDS);
-      delay *= slowStartMultiplier;
+    if (this.settings.enableSlowStart) {
+      const SLOW_START_WORDS = 5;
+      if (this.wordsReadInSession < SLOW_START_WORDS) {
+        const remainingSlowWords = SLOW_START_WORDS - this.wordsReadInSession;
+        const slowStartMultiplier = 1 + (remainingSlowWords / SLOW_START_WORDS);
+        delay *= slowStartMultiplier;
+      }
     }
 
     this.wordsReadInSession++;
@@ -291,21 +293,25 @@ export class RSVPEngine {
         const level = parseInt(headingMatch[1]);
         const firstWord = headingMatch[2];
 
-        // Collect following words until we hit a marker or line break
+        // Collect following words until we hit a line break or empty word
+        // Headings are single-line, so we stop at the first line break
         const titleWords = [firstWord];
         let j = i + 1;
         while (j < this.words.length) {
           const nextWord = this.words[j];
+
+          // Stop if empty word (line break became empty string)
+          if (!nextWord || nextWord.trim() === '') {
+            break;
+          }
 
           // Stop if we hit another marker
           if (/^\[H\d\]/.test(nextWord) || /^\[CALLOUT:/.test(nextWord)) {
             break;
           }
 
-          // Stop if we hit a paragraph break
+          // Stop if word contains line break (end of heading line)
           if (nextWord.includes('\n')) {
-            // Include this word but stop after
-            titleWords.push(nextWord.replace(/\n/g, ' ').trim());
             break;
           }
 
@@ -335,20 +341,25 @@ export class RSVPEngine {
         const calloutType = calloutMatch[1];
         const firstWord = calloutMatch[2];
 
-        // Collect following words until we hit a marker or line break
+        // Collect following words until we hit a line break or empty word
+        // Callout titles are single-line, so we stop at the first line break
         const titleWords = [firstWord];
         let j = i + 1;
         while (j < this.words.length) {
           const nextWord = this.words[j];
+
+          // Stop if empty word (line break became empty string)
+          if (!nextWord || nextWord.trim() === '') {
+            break;
+          }
 
           // Stop if we hit another marker
           if (/^\[H\d\]/.test(nextWord) || /^\[CALLOUT:/.test(nextWord)) {
             break;
           }
 
-          // Stop if we hit a paragraph break
+          // Stop if word contains line break (end of callout title line)
           if (nextWord.includes('\n')) {
-            titleWords.push(nextWord.replace(/\n/g, ' ').trim());
             break;
           }
 

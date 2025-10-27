@@ -27,6 +27,7 @@ export interface DashReaderSettings {
   hotkeyIncrementWpm: string;
   hotkeyDecrementWpm: string;
   hotkeyQuit: string;
+  enableSlowStart: boolean;
   enableAcceleration: boolean;
   accelerationDuration: number;
   accelerationTargetWpm: number;
@@ -61,6 +62,7 @@ export const DEFAULT_SETTINGS: DashReaderSettings = {
   hotkeyIncrementWpm: 'ArrowUp',
   hotkeyDecrementWpm: 'ArrowDown',
   hotkeyQuit: 'Escape',
+  enableSlowStart: true, // Enable slow start by default
   enableAcceleration: false,
   accelerationDuration: 30,
   accelerationTargetWpm: 600 // Increased from 450 (Stutter suggests 600-800)

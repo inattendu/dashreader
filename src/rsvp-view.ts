@@ -1033,20 +1033,6 @@ export class DashReaderView extends ItemView {
       sectionCounter.style.opacity = '0.8';
     }
 
-    // Visual progress bar
-    const barWidth = 10; // Total blocks
-    const filledBlocks = Math.round((progressPercent / 100) * barWidth);
-    const emptyBlocks = barWidth - filledBlocks;
-    const progressBar = '█'.repeat(filledBlocks) + '░'.repeat(emptyBlocks);
-
-    const barSpan = progressContainer.createSpan({
-      text: `[${progressBar}] ${Math.round(progressPercent)}%`,
-      cls: 'dashreader-progress-bar'
-    });
-    barSpan.style.fontFamily = 'monospace';
-    barSpan.style.letterSpacing = '0px';
-    barSpan.style.opacity = '0.7';
-
     // === BREADCRUMB PATH CONTAINER ===
     const breadcrumbPath = this.breadcrumbEl.createDiv({
       cls: 'dashreader-breadcrumb-path'

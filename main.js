@@ -142,11 +142,13 @@ var RSVPEngine = class {
     const chunk = this.getChunk(this.currentIndex);
     this.onWordChange(chunk);
     let delay = this.calculateDelay(chunk.text);
-    const SLOW_START_WORDS = 5;
-    if (this.wordsReadInSession < SLOW_START_WORDS) {
-      const remainingSlowWords = SLOW_START_WORDS - this.wordsReadInSession;
-      const slowStartMultiplier = 1 + remainingSlowWords / SLOW_START_WORDS;
-      delay *= slowStartMultiplier;
+    if (this.settings.enableSlowStart) {
+      const SLOW_START_WORDS = 5;
+      if (this.wordsReadInSession < SLOW_START_WORDS) {
+        const remainingSlowWords = SLOW_START_WORDS - this.wordsReadInSession;
+        const slowStartMultiplier = 1 + remainingSlowWords / SLOW_START_WORDS;
+        delay *= slowStartMultiplier;
+      }
     }
     this.wordsReadInSession++;
     this.currentIndex += this.settings.chunkSize;
@@ -242,11 +244,13 @@ var RSVPEngine = class {
         let j = i + 1;
         while (j < this.words.length) {
           const nextWord = this.words[j];
+          if (!nextWord || nextWord.trim() === "") {
+            break;
+          }
           if (/^\[H\d\]/.test(nextWord) || /^\[CALLOUT:/.test(nextWord)) {
             break;
           }
           if (nextWord.includes("\n")) {
-            titleWords.push(nextWord.replace(/\n/g, " ").trim());
             break;
           }
           titleWords.push(nextWord);
@@ -271,11 +275,13 @@ var RSVPEngine = class {
         let j = i + 1;
         while (j < this.words.length) {
           const nextWord = this.words[j];
+          if (!nextWord || nextWord.trim() === "") {
+            break;
+          }
           if (/^\[H\d\]/.test(nextWord) || /^\[CALLOUT:/.test(nextWord)) {
             break;
           }
           if (nextWord.includes("\n")) {
-            titleWords.push(nextWord.replace(/\n/g, " ").trim());
             break;
           }
           titleWords.push(nextWord);
@@ -2274,17 +2280,6 @@ var DashReaderView = class extends import_obsidian2.ItemView {
       });
       sectionCounter.style.opacity = "0.8";
     }
-    const barWidth = 10;
-    const filledBlocks = Math.round(progressPercent / 100 * barWidth);
-    const emptyBlocks = barWidth - filledBlocks;
-    const progressBar = "\u2588".repeat(filledBlocks) + "\u2591".repeat(emptyBlocks);
-    const barSpan = progressContainer.createSpan({
-      text: `[${progressBar}] ${Math.round(progressPercent)}%`,
-      cls: "dashreader-progress-bar"
-    });
-    barSpan.style.fontFamily = "monospace";
-    barSpan.style.letterSpacing = "0px";
-    barSpan.style.opacity = "0.7";
     const breadcrumbPath = this.breadcrumbEl.createDiv({
       cls: "dashreader-breadcrumb-path"
     });
@@ -2764,6 +2759,8 @@ var DEFAULT_SETTINGS = {
   hotkeyIncrementWpm: "ArrowUp",
   hotkeyDecrementWpm: "ArrowDown",
   hotkeyQuit: "Escape",
+  enableSlowStart: true,
+  // Enable slow start by default
   enableAcceleration: false,
   accelerationDuration: 30,
   accelerationTargetWpm: 600
