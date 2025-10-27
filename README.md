@@ -2,6 +2,8 @@
 
 **Speed reading plugin** using **RSVP** (Rapid Serial Visual Presentation) technique.
 
+![DashReader Demo](dashreader.gif)
+
 ## What is RSVP?
 
 **RSVP (Rapid Serial Visual Presentation)** is a speed reading technique that displays text one word at a time in the same fixed location on screen. This eliminates eye movement and allows your brain to focus entirely on comprehension, enabling reading speeds of 500-1000+ words per minute.
@@ -25,7 +27,7 @@ Instead of your eyes moving across lines of text, the text comes to you. Each wo
   - Numbers and dates: 1.8x delay
   - Long words (>8 chars): 1.4x delay
   - Paragraph breaks: 2.5x delay
-- **Heading-aware pauses** - longer pauses before H1 (3x), H2 (2.5x), H3 (2x), etc.
+- **Heading-aware pauses** - longer pauses before H1 (2x), H2 (1.8x), H3 (1.5x), etc.
 - **Callout-aware pauses** - visual separator and 2x delay for Obsidian callouts
 - **Progressive acceleration** - gradually increase speed during reading session
 - Default 400 WPM (comfortable range: 400-800 WPM with practice)
@@ -35,7 +37,7 @@ Instead of your eyes moving across lines of text, the text comes to you. Each wo
 - Parses markdown syntax (links, bold, italic, code)
 - Reads code block content
 - **Obsidian callouts support** - displays with icons (📝 note, 💡 tip, ⚠️ warning, etc.)
-- **Proportional heading display** - H1 displayed 2x larger, H2 at 1.75x, etc.
+- **Proportional heading display** - H1 displayed 1.5x larger, H2 at 1.3x, H3 at 1.2x, etc.
 - Visual separators before sections
 
 ### Contextual Navigation

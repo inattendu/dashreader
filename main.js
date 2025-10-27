@@ -193,26 +193,26 @@ var RSVPEngine = class {
     const headingMatch = trimmedText.match(/^\[H(\d)\]/);
     if (headingMatch) {
       const level = parseInt(headingMatch[1]);
-      const headingMultipliers = [0, 3, 2.5, 2, 1.8, 1.5, 1.3];
-      multiplier *= headingMultipliers[level] || 2;
+      const headingMultipliers = [0, 2, 1.8, 1.5, 1.3, 1.2, 1.1];
+      multiplier *= headingMultipliers[level] || 1.5;
     }
     const calloutMatch = trimmedText.match(/^\[CALLOUT:[\w-]+\]/);
     if (calloutMatch) {
-      multiplier *= 2;
+      multiplier *= this.settings.micropauseCallouts;
     }
     if (/^(\d+\.|[IVXLCDM]+\.|\w\.)/.test(trimmedText)) {
-      multiplier *= 2;
+      multiplier *= this.settings.micropauseSectionMarkers;
     }
     if (/^[-*+•]/.test(trimmedText)) {
-      multiplier *= 1.8;
+      multiplier *= this.settings.micropauseListBullets;
     }
     if (/[.!?]$/.test(text)) {
       multiplier *= this.settings.micropausePunctuation;
     } else if (/[;:,]$/.test(text)) {
-      multiplier *= 1.5;
+      multiplier *= this.settings.micropauseOtherPunctuation;
     }
     if (/\d/.test(text)) {
-      multiplier *= 1.8;
+      multiplier *= this.settings.micropauseNumbers;
     }
     if (text.length > 8) {
       multiplier *= this.settings.micropauseLongWords;
@@ -344,26 +344,26 @@ var RSVPEngine = class {
       const headingMatch = trimmedText.match(/^\[H(\d)\]/);
       if (headingMatch) {
         const level = parseInt(headingMatch[1]);
-        const headingMultipliers = [0, 3, 2.5, 2, 1.8, 1.5, 1.3];
-        multiplier *= headingMultipliers[level] || 2;
+        const headingMultipliers = [0, 2, 1.8, 1.5, 1.3, 1.2, 1.1];
+        multiplier *= headingMultipliers[level] || 1.5;
       }
       const calloutMatch = trimmedText.match(/^\[CALLOUT:[\w-]+\]/);
       if (calloutMatch) {
-        multiplier *= 2;
+        multiplier *= this.settings.micropauseCallouts;
       }
       if (/^(\d+\.|[IVXLCDM]+\.|\w\.)/.test(trimmedText)) {
-        multiplier *= 2;
+        multiplier *= this.settings.micropauseSectionMarkers;
       }
       if (/^[-*+•]/.test(trimmedText)) {
-        multiplier *= 1.8;
+        multiplier *= this.settings.micropauseListBullets;
       }
       if (/[.!?]$/.test(word)) {
         multiplier *= this.settings.micropausePunctuation;
       } else if (/[;:,]$/.test(word)) {
-        multiplier *= 1.5;
+        multiplier *= this.settings.micropauseOtherPunctuation;
       }
       if (/\d/.test(word)) {
-        multiplier *= 1.8;
+        multiplier *= this.settings.micropauseNumbers;
       }
       if (word.length > 8) {
         multiplier *= this.settings.micropauseLongWords;
@@ -792,16 +792,16 @@ var ICONS = {
   expand: "\u2922"
 };
 var HEADING_MULTIPLIERS = {
-  /** H1 heading multiplier (2x base font = major section) */
-  h1: 2,
-  /** H2 heading multiplier (1.75x base font) */
-  h2: 1.75,
-  /** H3 heading multiplier (1.5x base font) */
-  h3: 1.5,
-  /** H4 heading multiplier (1.25x base font) */
-  h4: 1.25,
-  /** H5 heading multiplier (1.1x base font) */
-  h5: 1.1,
+  /** H1 heading multiplier (1.5x base font = major section) */
+  h1: 1.5,
+  /** H2 heading multiplier (1.3x base font) */
+  h2: 1.3,
+  /** H3 heading multiplier (1.2x base font) */
+  h3: 1.2,
+  /** H4 heading multiplier (1.1x base font) */
+  h4: 1.1,
+  /** H5 heading multiplier (1.05x base font) */
+  h5: 1.05,
   /** H6 heading multiplier (1x base font = same as body text) */
   h6: 1
 };
@@ -2515,11 +2515,21 @@ var DEFAULT_SETTINGS = {
   contextWords: 3,
   enableMicropause: true,
   micropausePunctuation: 2.5,
-  // Increased from 1.5 (Stutter: 2.5 for sentences)
+  // Sentence-ending punctuation (.,!?) - Stutter-inspired
+  micropauseOtherPunctuation: 1.5,
+  // Other punctuation (;:,) - lighter pause
   micropauseLongWords: 1.4,
-  // Increased from 1.3 (Stutter: 1.4)
+  // Words >8 chars - Stutter-inspired
   micropauseParagraph: 2.5,
-  // Increased from 2.0 for better section separation
+  // Paragraph breaks - better section separation
+  micropauseNumbers: 1.8,
+  // Numbers and dates - comprehension aid
+  micropauseSectionMarkers: 2,
+  // Section numbers (1., I., etc.)
+  micropauseListBullets: 1.8,
+  // List bullets (-, *, +, •)
+  micropauseCallouts: 2,
+  // Obsidian callouts
   autoStart: false,
   autoStartDelay: 3,
   showProgress: true,

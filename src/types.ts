@@ -10,8 +10,13 @@ export interface DashReaderSettings {
   contextWords: number;
   enableMicropause: boolean;
   micropausePunctuation: number;
+  micropauseOtherPunctuation: number;
   micropauseLongWords: number;
   micropauseParagraph: number;
+  micropauseNumbers: number;
+  micropauseSectionMarkers: number;
+  micropauseListBullets: number;
+  micropauseCallouts: number;
   autoStart: boolean;
   autoStartDelay: number;
   showProgress: boolean;
@@ -38,9 +43,14 @@ export const DEFAULT_SETTINGS: DashReaderSettings = {
   showContext: true,
   contextWords: 3,
   enableMicropause: true,
-  micropausePunctuation: 2.5, // Increased from 1.5 (Stutter: 2.5 for sentences)
-  micropauseLongWords: 1.4, // Increased from 1.3 (Stutter: 1.4)
-  micropauseParagraph: 2.5, // Increased from 2.0 for better section separation
+  micropausePunctuation: 2.5, // Sentence-ending punctuation (.,!?) - Stutter-inspired
+  micropauseOtherPunctuation: 1.5, // Other punctuation (;:,) - lighter pause
+  micropauseLongWords: 1.4, // Words >8 chars - Stutter-inspired
+  micropauseParagraph: 2.5, // Paragraph breaks - better section separation
+  micropauseNumbers: 1.8, // Numbers and dates - comprehension aid
+  micropauseSectionMarkers: 2.0, // Section numbers (1., I., etc.)
+  micropauseListBullets: 1.8, // List bullets (-, *, +, •)
+  micropauseCallouts: 2.0, // Obsidian callouts
   autoStart: false,
   autoStartDelay: 3,
   showProgress: true,

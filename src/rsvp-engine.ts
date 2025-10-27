@@ -222,41 +222,40 @@ export class RSVPEngine {
     if (headingMatch) {
       const level = parseInt(headingMatch[1]);
       // Plus le niveau est bas (H1 = 1), plus la pause est longue
-      // H1 = 3.0x, H2 = 2.5x, H3 = 2.0x, H4 = 1.8x, H5 = 1.5x, H6 = 1.3x
-      const headingMultipliers = [0, 3.0, 2.5, 2.0, 1.8, 1.5, 1.3];
-      multiplier *= headingMultipliers[level] || 2.0;
+      // H1 = 2.0x, H2 = 1.8x, H3 = 1.5x, H4 = 1.3x, H5 = 1.2x, H6 = 1.1x
+      const headingMultipliers = [0, 2.0, 1.8, 1.5, 1.3, 1.2, 1.1];
+      multiplier *= headingMultipliers[level] || 1.5;
     }
 
     // Micropause pour les callouts Obsidian [CALLOUT:type]
     const calloutMatch = trimmedText.match(/^\[CALLOUT:[\w-]+\]/);
     if (calloutMatch) {
-      // Pause similaire à un H3 (changement de section important)
-      multiplier *= 2.0;
+      multiplier *= this.settings.micropauseCallouts;
     }
 
     // Micropause pour numéros de section (1., 2., I., II., etc.)
     if (/^(\d+\.|[IVXLCDM]+\.|\w\.)/.test(trimmedText)) {
-      multiplier *= 2.0;
+      multiplier *= this.settings.micropauseSectionMarkers;
     }
 
     // Micropause pour puces de liste (-, *, +, •)
     if (/^[-*+•]/.test(trimmedText)) {
-      multiplier *= 1.8;
+      multiplier *= this.settings.micropauseListBullets;
     }
 
     // Micropause pour la ponctuation (fin de texte)
     // Distinction: sentences (.,!?) vs other punctuation (:;,)
     if (/[.!?]$/.test(text)) {
       // Sentence-ending punctuation: full pause
-      multiplier *= this.settings.micropausePunctuation; // 2.5x
+      multiplier *= this.settings.micropausePunctuation;
     } else if (/[;:,]$/.test(text)) {
       // Other punctuation: lighter pause
-      multiplier *= 1.5;
+      multiplier *= this.settings.micropauseOtherPunctuation;
     }
 
     // Micropause pour les nombres (dates, statistiques, années, etc.)
     if (/\d/.test(text)) {
-      multiplier *= 1.8;
+      multiplier *= this.settings.micropauseNumbers;
     }
 
     // Micropause pour les mots longs (>8 caractères)
@@ -441,39 +440,39 @@ export class RSVPEngine {
       const headingMatch = trimmedText.match(/^\[H(\d)\]/);
       if (headingMatch) {
         const level = parseInt(headingMatch[1]);
-        const headingMultipliers = [0, 3.0, 2.5, 2.0, 1.8, 1.5, 1.3];
-        multiplier *= headingMultipliers[level] || 2.0;
+        const headingMultipliers = [0, 2.0, 1.8, 1.5, 1.3, 1.2, 1.1];
+        multiplier *= headingMultipliers[level] || 1.5;
       }
 
       // Micropause pour les callouts Obsidian [CALLOUT:type]
       const calloutMatch = trimmedText.match(/^\[CALLOUT:[\w-]+\]/);
       if (calloutMatch) {
-        multiplier *= 2.0;
+        multiplier *= this.settings.micropauseCallouts;
       }
 
       // Micropause pour numéros de section (1., 2., I., II., etc.)
       if (/^(\d+\.|[IVXLCDM]+\.|\w\.)/.test(trimmedText)) {
-        multiplier *= 2.0;
+        multiplier *= this.settings.micropauseSectionMarkers;
       }
 
       // Micropause pour puces de liste (-, *, +, •)
       if (/^[-*+•]/.test(trimmedText)) {
-        multiplier *= 1.8;
+        multiplier *= this.settings.micropauseListBullets;
       }
 
       // Micropause pour la ponctuation (fin de texte)
       // Distinction: sentences (.,!?) vs other punctuation (:;,)
       if (/[.!?]$/.test(word)) {
         // Sentence-ending punctuation: full pause
-        multiplier *= this.settings.micropausePunctuation; // 2.5x
+        multiplier *= this.settings.micropausePunctuation;
       } else if (/[;:,]$/.test(word)) {
         // Other punctuation: lighter pause
-        multiplier *= 1.5;
+        multiplier *= this.settings.micropauseOtherPunctuation;
       }
 
       // Micropause pour les nombres (dates, statistiques, années, etc.)
       if (/\d/.test(word)) {
-        multiplier *= 1.8;
+        multiplier *= this.settings.micropauseNumbers;
       }
 
       // Micropause pour les mots longs (>8 caractères)

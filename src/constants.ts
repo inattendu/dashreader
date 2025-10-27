@@ -262,22 +262,22 @@ export const ICONS = {
  * Provides visual hierarchy that matches markdown document structure.
  *
  * Example: If base font is 48px:
- * - H1 displays at 96px (2.0x)
- * - H2 displays at 84px (1.75x)
- * - H3 displays at 72px (1.5x)
+ * - H1 displays at 72px (1.5x)
+ * - H2 displays at 62.4px (1.3x)
+ * - H3 displays at 57.6px (1.2x)
  * - etc.
  */
 export const HEADING_MULTIPLIERS = {
-  /** H1 heading multiplier (2x base font = major section) */
-  h1: 2.0,
-  /** H2 heading multiplier (1.75x base font) */
-  h2: 1.75,
-  /** H3 heading multiplier (1.5x base font) */
-  h3: 1.5,
-  /** H4 heading multiplier (1.25x base font) */
-  h4: 1.25,
-  /** H5 heading multiplier (1.1x base font) */
-  h5: 1.1,
+  /** H1 heading multiplier (1.5x base font = major section) */
+  h1: 1.5,
+  /** H2 heading multiplier (1.3x base font) */
+  h2: 1.3,
+  /** H3 heading multiplier (1.2x base font) */
+  h3: 1.2,
+  /** H4 heading multiplier (1.1x base font) */
+  h4: 1.1,
+  /** H5 heading multiplier (1.05x base font) */
+  h5: 1.05,
   /** H6 heading multiplier (1x base font = same as body text) */
   h6: 1.0,
 } as const;
