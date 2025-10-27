@@ -354,16 +354,416 @@ var MarkdownParser = class {
   }
 };
 
+// src/view-state.ts
+var DEFAULT_VIEW_STATE = {
+  wordsRead: 0,
+  startTime: 0,
+  showingControls: false,
+  showingSettings: false,
+  showingStats: false,
+  currentWpm: 0,
+  currentChunkSize: 0,
+  currentFontSize: 0,
+  isLoading: false
+};
+var ViewState = class {
+  constructor(initialState = {}) {
+    this.listeners = /* @__PURE__ */ new Set();
+    this.state = { ...DEFAULT_VIEW_STATE, ...initialState };
+  }
+  /**
+   * Get a state value
+   */
+  get(key) {
+    return this.state[key];
+  }
+  /**
+   * Set a state value and notify listeners
+   */
+  set(key, value) {
+    const oldValue = this.state[key];
+    if (oldValue === value)
+      return;
+    this.state[key] = value;
+    this.notify(key, value, oldValue);
+  }
+  /**
+   * Update multiple state values at once
+   */
+  update(updates) {
+    Object.entries(updates).forEach(([key, value]) => {
+      this.set(key, value);
+    });
+  }
+  /**
+   * Reset state to defaults
+   */
+  reset() {
+    Object.entries(DEFAULT_VIEW_STATE).forEach(([key, value]) => {
+      this.set(key, value);
+    });
+  }
+  /**
+   * Subscribe to state changes
+   */
+  subscribe(listener) {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+  /**
+   * Notify all listeners of a state change
+   */
+  notify(key, value, oldValue) {
+    this.listeners.forEach((listener) => {
+      try {
+        listener(key, value, oldValue);
+      } catch (error) {
+        console.error("DashReader: Error in state listener", error);
+      }
+    });
+  }
+  /**
+   * Get all state as a plain object (for debugging)
+   */
+  getAll() {
+    return { ...this.state };
+  }
+  /**
+   * Toggle a boolean state value
+   */
+  toggle(key) {
+    const currentValue = this.get(key);
+    if (typeof currentValue === "boolean") {
+      this.set(key, !currentValue);
+    }
+  }
+  /**
+   * Increment a numeric state value
+   */
+  increment(key, delta = 1) {
+    const currentValue = this.get(key);
+    if (typeof currentValue === "number") {
+      this.set(key, currentValue + delta);
+    }
+  }
+};
+
+// src/constants.ts
+var CSS_CLASSES = {
+  // Main container
+  container: "dashreader-container",
+  // Toggle bar
+  toggleBar: "dashreader-toggle-bar",
+  toggleBtn: "dashreader-toggle-btn",
+  // Display area
+  display: "dashreader-display",
+  word: "dashreader-word",
+  welcome: "dashreader-welcome",
+  highlight: "dashreader-highlight",
+  // Context
+  contextBefore: "dashreader-context-before",
+  contextAfter: "dashreader-context-after",
+  // Progress
+  progressContainer: "dashreader-progress-container",
+  progressBar: "dashreader-progress-bar",
+  // Controls
+  controls: "dashreader-controls",
+  controlGroup: "dashreader-control-group",
+  controlLabel: "control-label",
+  // Settings
+  settings: "dashreader-settings",
+  settingGroup: "dashreader-setting-group",
+  settingLabel: "setting-label",
+  settingToggle: "setting-toggle",
+  // Stats
+  stats: "dashreader-stats",
+  statsText: "dashreader-stats-text",
+  wpmDisplay: "dashreader-wpm-display",
+  // Buttons
+  btn: "dashreader-btn",
+  playBtn: "play-btn",
+  pauseBtn: "pause-btn",
+  smallBtn: "small-btn",
+  // Value displays
+  wpmValue: "wpm-value",
+  wpmInlineValue: "wpm-inline-value",
+  chunkValue: "chunk-value",
+  fontValue: "font-value",
+  accelDurationValue: "accel-duration-value",
+  accelTargetValue: "accel-target-value",
+  // State classes
+  hidden: "hidden"
+};
+var TIMING = {
+  autoLoadDelay: 300,
+  autoLoadDelayShort: 200,
+  autoLoadDelayVeryShort: 50,
+  throttleDelay: 150,
+  transitionDuration: 300
+};
+var TEXT_LIMITS = {
+  minSelectionLength: 30,
+  minContentLength: 50,
+  minParsedLength: 10
+};
+var INCREMENTS = {
+  wpm: 25,
+  chunkSize: 1,
+  fontSize: 4,
+  accelDuration: 5
+};
+var LIMITS = {
+  fontSize: { min: 20, max: 120 },
+  wpm: { min: 50, max: 1e3 },
+  accelDuration: { min: 10, max: 120 }
+};
+var ICONS = {
+  rewind: "\u23EE",
+  play: "\u25B6",
+  pause: "\u23F8",
+  forward: "\u23ED",
+  stop: "\u23F9",
+  increment: "+",
+  decrement: "\u2212",
+  settings: "\u2699\uFE0F",
+  stats: "\u{1F4CA}",
+  file: "\u{1F4C4}",
+  celebration: "\u{1F389}",
+  book: "\u{1F4D6}"
+};
+var HEADING_MULTIPLIERS = {
+  h1: 2,
+  h2: 1.75,
+  h3: 1.5,
+  h4: 1.25,
+  h5: 1.1,
+  h6: 1
+};
+
+// src/dom-registry.ts
+var DOMRegistry = class {
+  constructor() {
+    this.elements = /* @__PURE__ */ new Map();
+  }
+  /**
+   * Register a DOM element by key
+   */
+  register(key, element) {
+    this.elements.set(key, element);
+  }
+  /**
+   * Get a registered DOM element
+   */
+  get(key) {
+    return this.elements.get(key);
+  }
+  /**
+   * Update text content of a registered element
+   */
+  updateText(key, text) {
+    const element = this.elements.get(key);
+    if (element) {
+      element.setText(String(text));
+    }
+  }
+  /**
+   * Update HTML content of a registered element (use with caution - ensure content is escaped)
+   */
+  updateHTML(key, html) {
+    const element = this.elements.get(key);
+    if (element) {
+      element.innerHTML = html;
+    }
+  }
+  /**
+   * Update style property of a registered element
+   */
+  updateStyle(key, property, value) {
+    const element = this.elements.get(key);
+    if (element) {
+      element.style[property] = value;
+    }
+  }
+  /**
+   * Toggle CSS class on a registered element
+   * @param force - true to add class, false to remove it
+   */
+  toggleClass(key, className, force) {
+    const element = this.elements.get(key);
+    if (element) {
+      element.toggleClass(className, force);
+    }
+  }
+  /**
+   * Add CSS class to a registered element
+   */
+  addClass(key, className) {
+    const element = this.elements.get(key);
+    if (element) {
+      element.classList.add(className);
+    }
+  }
+  /**
+   * Remove CSS class from a registered element
+   */
+  removeClass(key, className) {
+    const element = this.elements.get(key);
+    if (element) {
+      element.classList.remove(className);
+    }
+  }
+  /**
+   * Empty the content of a registered element
+   */
+  empty(key) {
+    const element = this.elements.get(key);
+    if (element) {
+      element.empty();
+    }
+  }
+  /**
+   * Check if an element is registered
+   */
+  has(key) {
+    return this.elements.has(key);
+  }
+  /**
+   * Clear all registered elements
+   */
+  clear() {
+    this.elements.clear();
+  }
+  /**
+   * Update multiple text elements at once
+   */
+  updateMultipleText(updates) {
+    Object.entries(updates).forEach(([key, value]) => {
+      if (value !== void 0) {
+        this.updateText(key, value);
+      }
+    });
+  }
+  /**
+   * Toggle visibility of multiple elements
+   */
+  toggleMultipleVisibility(toggles) {
+    Object.entries(toggles).forEach(([key, visible]) => {
+      if (typeof visible === "boolean") {
+        this.toggleClass(key, CSS_CLASSES.hidden, !visible);
+      }
+    });
+  }
+};
+
+// src/ui-builders.ts
+function createButton(parent, config) {
+  const className = config.className ? `${CSS_CLASSES.btn} ${config.className}` : CSS_CLASSES.btn;
+  const btn = parent.createEl("button", {
+    text: config.icon,
+    cls: className,
+    attr: { title: config.title }
+  });
+  btn.addEventListener("click", config.onClick);
+  return btn;
+}
+function createNumberControl(parent, config, registry) {
+  const container = parent.createDiv({ cls: CSS_CLASSES.controlGroup });
+  container.createEl("span", {
+    text: config.label,
+    cls: CSS_CLASSES.controlLabel
+  });
+  createButton(container, {
+    icon: config.decrementIcon || ICONS.decrement,
+    title: config.decrementTitle || `Decrease (${config.increment || 1})`,
+    onClick: config.onDecrement,
+    className: CSS_CLASSES.smallBtn
+  });
+  const valueEl = container.createEl("span", {
+    text: String(config.value),
+    cls: config.registryKey || "value-display"
+  });
+  if (config.registryKey && registry) {
+    registry.register(config.registryKey, valueEl);
+  }
+  createButton(container, {
+    icon: config.incrementIcon || ICONS.increment,
+    title: config.incrementTitle || `Increase (+${config.increment || 1})`,
+    onClick: config.onIncrement,
+    className: CSS_CLASSES.smallBtn
+  });
+  return { container, valueEl };
+}
+function createToggleControl(parent, config) {
+  const container = parent.createDiv({ cls: CSS_CLASSES.settingGroup });
+  const toggle = container.createEl("label", { cls: CSS_CLASSES.settingToggle });
+  const checkbox = toggle.createEl("input", { type: "checkbox" });
+  checkbox.checked = config.checked;
+  checkbox.addEventListener("change", () => {
+    config.onChange(checkbox.checked);
+  });
+  toggle.createEl("span", { text: ` ${config.label}` });
+  return { container, checkbox };
+}
+function createPlayPauseButtons(parent, onPlay, onPause, registry) {
+  const playBtn = createButton(parent, {
+    icon: ICONS.play,
+    title: "Play (Shift+Space)",
+    onClick: onPlay,
+    className: CSS_CLASSES.playBtn
+  });
+  const pauseBtn = createButton(parent, {
+    icon: ICONS.pause,
+    title: "Pause (Shift+Space)",
+    onClick: onPause,
+    className: `${CSS_CLASSES.pauseBtn} ${CSS_CLASSES.hidden}`
+  });
+  registry.register("playBtn", playBtn);
+  registry.register("pauseBtn", pauseBtn);
+}
+function updatePlayPauseButtons(registry, isPlaying) {
+  registry.toggleClass("playBtn", CSS_CLASSES.hidden, isPlaying);
+  registry.toggleClass("pauseBtn", CSS_CLASSES.hidden, !isPlaying);
+}
+function formatTime(seconds) {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
+}
+function escapeHtml(text) {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+}
+function createWelcomeMessage() {
+  return `
+    <div style="font-size: 20px; color: var(--text-muted); text-align: center;">
+      <div style="margin-bottom: 12px;">${ICONS.book} Select text to start reading</div>
+      <div style="font-size: 14px; opacity: 0.7;">or use Cmd+P \u2192 "Read selected text"</div>
+    </div>
+  `;
+}
+function createReadyMessage(wordsToRead, totalWords, startIndex, durationText, sourceInfo = "") {
+  const startInfo = startIndex !== void 0 && startIndex > 0 ? ` <span style="opacity: 0.6;">(starting at word ${startIndex + 1}/${totalWords})</span>` : "";
+  return `
+    <div style="font-size: 18px; color: var(--text-muted); text-align: center;">
+      ${sourceInfo}
+      Ready to read ${wordsToRead} words${startInfo}<br/>
+      <span style="font-size: 14px; opacity: 0.7;">Estimated time: ~${durationText}</span><br/>
+      <span style="font-size: 14px; opacity: 0.7;">Press Shift+Space to start</span>
+    </div>
+  `;
+}
+
 // src/rsvp-view.ts
 var VIEW_TYPE_DASHREADER = "dashreader-view";
 var DashReaderView = class extends import_obsidian.ItemView {
   constructor(leaf, settings) {
     super(leaf);
-    this.startTime = 0;
-    this.wordsRead = 0;
-    this.showingControls = false;
-    this.showingSettings = false;
     this.settings = settings;
+    this.state = new ViewState({
+      currentWpm: settings.wpm,
+      currentChunkSize: settings.chunkSize,
+      currentFontSize: settings.fontSize
+    });
+    this.dom = new DOMRegistry();
     this.engine = new RSVPEngine(
       settings,
       this.onWordChange.bind(this),
@@ -380,7 +780,7 @@ var DashReaderView = class extends import_obsidian.ItemView {
     return "zap";
   }
   async onOpen() {
-    this.mainContainerEl = this.contentEl.createDiv({ cls: "dashreader-container" });
+    this.mainContainerEl = this.contentEl.createDiv({ cls: CSS_CLASSES.container });
     this.buildUI();
     this.setupHotkeys();
     this.app.workspace.onLayoutReady(() => {
@@ -388,146 +788,279 @@ var DashReaderView = class extends import_obsidian.ItemView {
     });
   }
   buildUI() {
-    this.toggleBar = this.mainContainerEl.createDiv({ cls: "dashreader-toggle-bar" });
-    const toggleControls = this.toggleBar.createEl("button", {
-      cls: "dashreader-toggle-btn",
-      attr: { title: "Toggle controls (C)" }
+    this.buildToggleBar();
+    this.buildStats();
+    this.buildDisplayArea();
+    this.buildProgressBar();
+    this.buildControls();
+    this.buildInlineSettings();
+  }
+  buildToggleBar() {
+    this.toggleBar = this.mainContainerEl.createDiv({ cls: CSS_CLASSES.toggleBar });
+    createButton(this.toggleBar, {
+      icon: ICONS.settings,
+      title: "Toggle controls (C)",
+      onClick: () => this.togglePanel("controls"),
+      className: CSS_CLASSES.toggleBtn
     });
-    toggleControls.innerHTML = "\u2699\uFE0F";
-    toggleControls.addEventListener("click", () => this.toggleControls());
-    const toggleStats = this.toggleBar.createEl("button", {
-      cls: "dashreader-toggle-btn",
-      attr: { title: "Toggle stats (S)" }
+    createButton(this.toggleBar, {
+      icon: ICONS.stats,
+      title: "Toggle stats (S)",
+      onClick: () => this.togglePanel("stats"),
+      className: CSS_CLASSES.toggleBtn
     });
-    toggleStats.innerHTML = "\u{1F4CA}";
-    toggleStats.addEventListener("click", () => this.toggleStats());
-    this.statsEl = this.mainContainerEl.createDiv({ cls: "dashreader-stats hidden" });
-    this.wpmDisplayEl = this.statsEl.createDiv({ cls: "dashreader-wpm-display" });
-    this.wpmDisplayEl.setText(`${this.settings.wpm} WPM`);
-    const statsText = this.statsEl.createDiv({ cls: "dashreader-stats-text" });
+  }
+  buildStats() {
+    this.statsEl = this.mainContainerEl.createDiv({
+      cls: `${CSS_CLASSES.stats} ${CSS_CLASSES.hidden}`
+    });
+    this.dom.register("statsEl", this.statsEl);
+    const wpmDisplay = this.statsEl.createDiv({ cls: CSS_CLASSES.wpmDisplay });
+    wpmDisplay.setText(`${this.settings.wpm} WPM`);
+    this.dom.register("wpmDisplay", wpmDisplay);
+    const statsText = this.statsEl.createDiv({ cls: CSS_CLASSES.statsText });
     statsText.setText("Ready");
-    const displayArea = this.mainContainerEl.createDiv({ cls: "dashreader-display" });
+    this.dom.register("statsText", statsText);
+  }
+  buildDisplayArea() {
+    const displayArea = this.mainContainerEl.createDiv({ cls: CSS_CLASSES.display });
     if (this.settings.showContext) {
-      this.contextBeforeEl = displayArea.createDiv({ cls: "dashreader-context-before" });
+      this.contextBeforeEl = displayArea.createDiv({ cls: CSS_CLASSES.contextBefore });
+      this.dom.register("contextBeforeEl", this.contextBeforeEl);
     }
-    this.wordEl = displayArea.createDiv({ cls: "dashreader-word" });
+    this.wordEl = displayArea.createDiv({ cls: CSS_CLASSES.word });
     this.wordEl.style.fontSize = `${this.settings.fontSize}px`;
     this.wordEl.style.fontFamily = this.settings.fontFamily;
     this.wordEl.style.color = this.settings.fontColor;
-    const welcomeMsg = this.wordEl.createDiv({ cls: "dashreader-welcome" });
-    welcomeMsg.innerHTML = `
-      <div style="font-size: 20px; color: var(--text-muted); text-align: center;">
-        <div style="margin-bottom: 12px;">\u{1F4D6} Select text to start reading</div>
-        <div style="font-size: 14px; opacity: 0.7;">or use Cmd+P \u2192 "Read selected text"</div>
-      </div>
-    `;
+    this.wordEl.innerHTML = createWelcomeMessage();
+    this.dom.register("wordEl", this.wordEl);
     if (this.settings.showContext) {
-      this.contextAfterEl = displayArea.createDiv({ cls: "dashreader-context-after" });
+      this.contextAfterEl = displayArea.createDiv({ cls: CSS_CLASSES.contextAfter });
+      this.dom.register("contextAfterEl", this.contextAfterEl);
     }
-    this.progressEl = this.mainContainerEl.createDiv({ cls: "dashreader-progress-container" });
-    const progressBar = this.progressEl.createDiv({ cls: "dashreader-progress-bar" });
+  }
+  buildProgressBar() {
+    this.progressEl = this.mainContainerEl.createDiv({ cls: CSS_CLASSES.progressContainer });
+    const progressBar = this.progressEl.createDiv({ cls: CSS_CLASSES.progressBar });
     progressBar.style.width = "0%";
     progressBar.style.background = this.settings.highlightColor;
-    this.controlsEl = this.mainContainerEl.createDiv({ cls: "dashreader-controls hidden" });
-    this.buildControls();
-    this.settingsEl = this.mainContainerEl.createDiv({ cls: "dashreader-settings hidden" });
-    this.buildInlineSettings();
+    this.dom.register("progressBar", progressBar);
   }
   buildControls() {
-    const playControls = this.controlsEl.createDiv({ cls: "dashreader-control-group" });
-    this.createButton(playControls, "\u23EE", "Rewind (\u2190)", () => this.engine.rewind());
-    this.createButton(playControls, "\u25B6", "Play (Shift+Space)", () => this.togglePlay(), "play-btn");
-    this.createButton(playControls, "\u23F8", "Pause (Shift+Space)", () => this.engine.pause(), "pause-btn hidden");
-    this.createButton(playControls, "\u23ED", "Forward (\u2192)", () => this.engine.forward());
-    this.createButton(playControls, "\u23F9", "Stop (Esc)", () => this.engine.reset());
-    const wpmGroup = this.controlsEl.createDiv({ cls: "dashreader-control-group" });
-    wpmGroup.createEl("span", { text: "WPM: ", cls: "control-label" });
-    this.createButton(wpmGroup, "\u2212", "Decrease WPM (\u2193)", () => this.changeWpm(-25), "small-btn");
-    const wpmValue = wpmGroup.createEl("span", { text: String(this.settings.wpm), cls: "wpm-value" });
-    this.createButton(wpmGroup, "+", "Increase WPM (\u2191)", () => this.changeWpm(25), "small-btn");
-    const wordsGroup = this.controlsEl.createDiv({ cls: "dashreader-control-group" });
-    wordsGroup.createEl("span", { text: "Words: ", cls: "control-label" });
-    this.createButton(wordsGroup, "\u2212", "Fewer words", () => this.changeChunkSize(-1), "small-btn");
-    const chunkValue = wordsGroup.createEl("span", { text: String(this.settings.chunkSize), cls: "chunk-value" });
-    this.createButton(wordsGroup, "+", "More words", () => this.changeChunkSize(1), "small-btn");
+    this.controlsEl = this.mainContainerEl.createDiv({
+      cls: `${CSS_CLASSES.controls} ${CSS_CLASSES.hidden}`
+    });
+    this.dom.register("controlsEl", this.controlsEl);
+    const playControls = this.controlsEl.createDiv({ cls: CSS_CLASSES.controlGroup });
+    createButton(playControls, {
+      icon: ICONS.rewind,
+      title: "Rewind (\u2190)",
+      onClick: () => this.engine.rewind()
+    });
+    createPlayPauseButtons(playControls, () => this.togglePlay(), () => this.engine.pause(), this.dom);
+    createButton(playControls, {
+      icon: ICONS.forward,
+      title: "Forward (\u2192)",
+      onClick: () => this.engine.forward()
+    });
+    createButton(playControls, {
+      icon: ICONS.stop,
+      title: "Stop (Esc)",
+      onClick: () => this.engine.reset()
+    });
+    createNumberControl(
+      this.controlsEl,
+      {
+        label: "WPM: ",
+        value: this.settings.wpm,
+        onIncrement: () => this.changeValue("wpm", INCREMENTS.wpm),
+        onDecrement: () => this.changeValue("wpm", -INCREMENTS.wpm),
+        increment: INCREMENTS.wpm,
+        registryKey: "wpmValue"
+      },
+      this.dom
+    );
+    createNumberControl(
+      this.controlsEl,
+      {
+        label: "Words: ",
+        value: this.settings.chunkSize,
+        onIncrement: () => this.changeValue("chunkSize", INCREMENTS.chunkSize),
+        onDecrement: () => this.changeValue("chunkSize", -INCREMENTS.chunkSize),
+        registryKey: "chunkValue"
+      },
+      this.dom
+    );
   }
   buildInlineSettings() {
-    const wpmGroup = this.settingsEl.createDiv({ cls: "dashreader-setting-group" });
-    wpmGroup.createEl("span", { text: "Speed (WPM): ", cls: "setting-label" });
-    this.createButton(wpmGroup, "\u2212", "Slower (-25)", () => this.changeWpmInline(-25), "small-btn");
-    const wpmValue = wpmGroup.createEl("span", { text: String(this.settings.wpm), cls: "wpm-inline-value" });
-    this.createButton(wpmGroup, "+", "Faster (+25)", () => this.changeWpmInline(25), "small-btn");
-    const accelToggleGroup = this.settingsEl.createDiv({ cls: "dashreader-setting-group" });
-    const accelToggle = accelToggleGroup.createEl("label", { cls: "setting-toggle" });
-    const accelCheckbox = accelToggle.createEl("input", { type: "checkbox" });
-    accelCheckbox.checked = this.settings.enableAcceleration;
-    accelCheckbox.addEventListener("change", () => {
-      this.settings.enableAcceleration = accelCheckbox.checked;
-      this.engine.updateSettings(this.settings);
-      accelDurationGroup.style.display = accelCheckbox.checked ? "flex" : "none";
-      accelTargetGroup.style.display = accelCheckbox.checked ? "flex" : "none";
+    this.settingsEl = this.mainContainerEl.createDiv({
+      cls: `${CSS_CLASSES.settings} ${CSS_CLASSES.hidden}`
     });
-    accelToggle.createEl("span", { text: " Speed Acceleration" });
-    const accelDurationGroup = this.settingsEl.createDiv({ cls: "dashreader-setting-group" });
-    accelDurationGroup.createEl("span", { text: "Accel Duration (s): ", cls: "setting-label" });
-    this.createButton(accelDurationGroup, "\u2212", "Shorter (-5s)", () => this.changeAccelDuration(-5), "small-btn");
-    const accelDurationValue = accelDurationGroup.createEl("span", { text: String(this.settings.accelerationDuration), cls: "accel-duration-value" });
-    this.createButton(accelDurationGroup, "+", "Longer (+5s)", () => this.changeAccelDuration(5), "small-btn");
-    accelDurationGroup.style.display = this.settings.enableAcceleration ? "flex" : "none";
-    const accelTargetGroup = this.settingsEl.createDiv({ cls: "dashreader-setting-group" });
-    accelTargetGroup.createEl("span", { text: "Target WPM: ", cls: "setting-label" });
-    this.createButton(accelTargetGroup, "\u2212", "Lower (-25)", () => this.changeAccelTarget(-25), "small-btn");
-    const accelTargetValue = accelTargetGroup.createEl("span", { text: String(this.settings.accelerationTargetWpm), cls: "accel-target-value" });
-    this.createButton(accelTargetGroup, "+", "Higher (+25)", () => this.changeAccelTarget(25), "small-btn");
-    accelTargetGroup.style.display = this.settings.enableAcceleration ? "flex" : "none";
-    const fontSizeGroup = this.settingsEl.createDiv({ cls: "dashreader-setting-group" });
-    fontSizeGroup.createEl("span", { text: "Font Size: ", cls: "setting-label" });
-    this.createButton(fontSizeGroup, "\u2212", "Smaller", () => this.changeFontSize(-4), "small-btn");
-    const fontValue = fontSizeGroup.createEl("span", { text: String(this.settings.fontSize), cls: "font-value" });
-    this.createButton(fontSizeGroup, "+", "Larger", () => this.changeFontSize(4), "small-btn");
-    const contextGroup = this.settingsEl.createDiv({ cls: "dashreader-setting-group" });
-    const contextToggle = contextGroup.createEl("label", { cls: "setting-toggle" });
-    const contextCheckbox = contextToggle.createEl("input", { type: "checkbox" });
-    contextCheckbox.checked = this.settings.showContext;
-    contextCheckbox.addEventListener("change", () => {
-      this.settings.showContext = contextCheckbox.checked;
-      this.toggleContextDisplay();
+    this.dom.register("settingsEl", this.settingsEl);
+    createNumberControl(
+      this.settingsEl,
+      {
+        label: "Speed (WPM): ",
+        value: this.settings.wpm,
+        onIncrement: () => this.changeValue("wpm", INCREMENTS.wpm),
+        onDecrement: () => this.changeValue("wpm", -INCREMENTS.wpm),
+        increment: INCREMENTS.wpm,
+        registryKey: "wpmInlineValue",
+        decrementTitle: "Slower (-25)",
+        incrementTitle: "Faster (+25)"
+      },
+      this.dom
+    );
+    const accelToggle = createToggleControl(this.settingsEl, {
+      label: "Speed Acceleration",
+      checked: this.settings.enableAcceleration,
+      onChange: (checked) => {
+        this.settings.enableAcceleration = checked;
+        this.engine.updateSettings(this.settings);
+        this.accelDurationGroup.style.display = checked ? "flex" : "none";
+        this.accelTargetGroup.style.display = checked ? "flex" : "none";
+      }
     });
-    contextToggle.createEl("span", { text: " Show context" });
-    const micropauseGroup = this.settingsEl.createDiv({ cls: "dashreader-setting-group" });
-    const micropauseToggle = micropauseGroup.createEl("label", { cls: "setting-toggle" });
-    const micropauseCheckbox = micropauseToggle.createEl("input", { type: "checkbox" });
-    micropauseCheckbox.checked = this.settings.enableMicropause;
-    micropauseCheckbox.addEventListener("change", () => {
-      this.settings.enableMicropause = micropauseCheckbox.checked;
-      this.engine.updateSettings(this.settings);
+    const accelDurationControl = createNumberControl(
+      this.settingsEl,
+      {
+        label: "Accel Duration (s): ",
+        value: this.settings.accelerationDuration,
+        onIncrement: () => this.changeValue("accelDuration", INCREMENTS.accelDuration),
+        onDecrement: () => this.changeValue("accelDuration", -INCREMENTS.accelDuration),
+        registryKey: "accelDurationValue",
+        decrementTitle: "Shorter (-5s)",
+        incrementTitle: "Longer (+5s)"
+      },
+      this.dom
+    );
+    this.accelDurationGroup = accelDurationControl.container;
+    this.accelDurationGroup.style.display = this.settings.enableAcceleration ? "flex" : "none";
+    const accelTargetControl = createNumberControl(
+      this.settingsEl,
+      {
+        label: "Target WPM: ",
+        value: this.settings.accelerationTargetWpm,
+        onIncrement: () => this.changeValue("accelTarget", INCREMENTS.wpm),
+        onDecrement: () => this.changeValue("accelTarget", -INCREMENTS.wpm),
+        registryKey: "accelTargetValue",
+        decrementTitle: "Lower (-25)",
+        incrementTitle: "Higher (+25)"
+      },
+      this.dom
+    );
+    this.accelTargetGroup = accelTargetControl.container;
+    this.accelTargetGroup.style.display = this.settings.enableAcceleration ? "flex" : "none";
+    createNumberControl(
+      this.settingsEl,
+      {
+        label: "Font Size: ",
+        value: this.settings.fontSize,
+        onIncrement: () => this.changeValue("fontSize", INCREMENTS.fontSize),
+        onDecrement: () => this.changeValue("fontSize", -INCREMENTS.fontSize),
+        registryKey: "fontValue",
+        decrementTitle: "Smaller",
+        incrementTitle: "Larger"
+      },
+      this.dom
+    );
+    createToggleControl(this.settingsEl, {
+      label: "Show context",
+      checked: this.settings.showContext,
+      onChange: (checked) => {
+        this.settings.showContext = checked;
+        this.toggleContextDisplay();
+      }
     });
-    micropauseToggle.createEl("span", { text: " Micropause" });
+    createToggleControl(this.settingsEl, {
+      label: "Micropause",
+      checked: this.settings.enableMicropause,
+      onChange: (checked) => {
+        this.settings.enableMicropause = checked;
+        this.engine.updateSettings(this.settings);
+      }
+    });
   }
-  createButton(parent, text, title, onClick, className = "") {
-    const btn = parent.createEl("button", {
-      text,
-      cls: `dashreader-btn ${className}`,
-      attr: { title }
-    });
-    btn.addEventListener("click", onClick);
-    return btn;
+  /**
+   * Unified value change handler - replaces all changeWpm*, changeFontSize, etc.
+   */
+  changeValue(type, delta) {
+    switch (type) {
+      case "wpm": {
+        const newWpm = this.engine.getWpm() + delta;
+        this.engine.setWpm(newWpm);
+        this.settings.wpm = this.engine.getWpm();
+        this.state.set("currentWpm", this.settings.wpm);
+        this.dom.updateMultipleText({
+          wpmDisplay: `${this.settings.wpm} WPM`,
+          wpmValue: String(this.settings.wpm),
+          wpmInlineValue: String(this.settings.wpm)
+        });
+        break;
+      }
+      case "chunkSize": {
+        const newSize = this.engine.getChunkSize() + delta;
+        this.engine.setChunkSize(newSize);
+        this.settings.chunkSize = this.engine.getChunkSize();
+        this.state.set("currentChunkSize", this.settings.chunkSize);
+        this.dom.updateText("chunkValue", this.settings.chunkSize);
+        break;
+      }
+      case "fontSize": {
+        const newSize = Math.max(
+          LIMITS.fontSize.min,
+          Math.min(LIMITS.fontSize.max, this.settings.fontSize + delta)
+        );
+        this.settings.fontSize = newSize;
+        this.state.set("currentFontSize", newSize);
+        this.wordEl.style.fontSize = `${newSize}px`;
+        this.dom.updateText("fontValue", newSize);
+        break;
+      }
+      case "accelDuration": {
+        const newDuration = Math.max(
+          LIMITS.accelDuration.min,
+          Math.min(LIMITS.accelDuration.max, this.settings.accelerationDuration + delta)
+        );
+        this.settings.accelerationDuration = newDuration;
+        this.engine.updateSettings(this.settings);
+        this.dom.updateText("accelDurationValue", newDuration);
+        break;
+      }
+      case "accelTarget": {
+        const newTarget = Math.max(
+          LIMITS.wpm.min,
+          Math.min(LIMITS.wpm.max, this.settings.accelerationTargetWpm + delta)
+        );
+        this.settings.accelerationTargetWpm = newTarget;
+        this.engine.updateSettings(this.settings);
+        this.dom.updateText("accelTargetValue", newTarget);
+        break;
+      }
+    }
   }
-  toggleControls() {
-    this.showingControls = !this.showingControls;
-    this.controlsEl.toggleClass("hidden", !this.showingControls);
-    this.settingsEl.toggleClass("hidden", !this.showingControls);
-  }
-  toggleStats() {
-    this.showingSettings = !this.showingSettings;
-    this.statsEl.toggleClass("hidden", !this.showingSettings);
+  /**
+   * Unified panel toggle - replaces toggleControls, toggleStats, toggleSettings
+   */
+  togglePanel(panel) {
+    if (panel === "controls") {
+      this.state.toggle("showingControls");
+      const showing = this.state.get("showingControls");
+      this.controlsEl.toggleClass(CSS_CLASSES.hidden, !showing);
+      this.settingsEl.toggleClass(CSS_CLASSES.hidden, !showing);
+    } else if (panel === "stats") {
+      this.state.toggle("showingStats");
+      const showing = this.state.get("showingStats");
+      this.statsEl.toggleClass(CSS_CLASSES.hidden, !showing);
+    }
   }
   toggleContextDisplay() {
+    const display = this.settings.showContext ? "block" : "none";
     if (this.contextBeforeEl) {
-      this.contextBeforeEl.style.display = this.settings.showContext ? "block" : "none";
+      this.contextBeforeEl.style.display = display;
     }
     if (this.contextAfterEl) {
-      this.contextAfterEl.style.display = this.settings.showContext ? "block" : "none";
+      this.contextAfterEl.style.display = display;
     }
   }
   setupAutoLoad() {
@@ -537,9 +1070,8 @@ var DashReaderView = class extends import_obsidian.ItemView {
     let lastCheckTime = 0;
     const checkSelectionOrCursor = () => {
       const now = Date.now();
-      if (now - lastCheckTime < 150) {
+      if (now - lastCheckTime < TIMING.throttleDelay)
         return;
-      }
       lastCheckTime = now;
       const activeView = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
       if (!activeView)
@@ -550,7 +1082,7 @@ var DashReaderView = class extends import_obsidian.ItemView {
       const fileName = currentFile.name;
       if (activeView.editor.somethingSelected()) {
         const selection = activeView.editor.getSelection();
-        if (selection && selection.length > 30 && selection !== lastSelection) {
+        if (selection && selection.length > TEXT_LIMITS.minSelectionLength && selection !== lastSelection) {
           lastSelection = selection;
           const cursor = activeView.editor.getCursor("from");
           const lineNumber = cursor.line + 1;
@@ -559,7 +1091,7 @@ var DashReaderView = class extends import_obsidian.ItemView {
         }
       } else {
         const fullContent = activeView.editor.getValue();
-        if (fullContent && fullContent.trim().length > 50) {
+        if (fullContent && fullContent.trim().length > TEXT_LIMITS.minContentLength) {
           const cursor = activeView.editor.getCursor();
           const cursorPosition = activeView.editor.posToOffset(cursor);
           if (cursorPosition !== lastCursorPosition) {
@@ -589,7 +1121,7 @@ var DashReaderView = class extends import_obsidian.ItemView {
             const fileName = file.name;
             if (activeView.editor.somethingSelected()) {
               const selection = activeView.editor.getSelection();
-              if (selection && selection.length > 30) {
+              if (selection && selection.length > TEXT_LIMITS.minSelectionLength) {
                 const cursor = activeView.editor.getCursor("from");
                 const lineNumber = cursor.line + 1;
                 console.log("DashReader: Auto-loading selection", selection.length, "characters from line", lineNumber);
@@ -598,21 +1130,20 @@ var DashReaderView = class extends import_obsidian.ItemView {
               }
             }
             const fullContent = activeView.editor.getValue();
-            if (fullContent && fullContent.trim().length > 50) {
+            if (fullContent && fullContent.trim().length > TEXT_LIMITS.minContentLength) {
               const cursor = activeView.editor.getCursor();
               const cursorPosition = activeView.editor.posToOffset(cursor);
               console.log("DashReader: Auto-loading entire page from cursor position", cursorPosition);
               this.loadText(fullContent, { fileName, cursorPosition });
             }
           }
-        }, 300);
+        }, TIMING.autoLoadDelay);
       })
     );
     this.registerEvent(
       this.app.workspace.on("active-leaf-change", (leaf) => {
-        if (!this.mainContainerEl || !this.mainContainerEl.isShown()) {
+        if (!this.mainContainerEl || !this.mainContainerEl.isShown())
           return;
-        }
         console.log("DashReader: Active leaf changed");
         const activeView = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
         if (activeView) {
@@ -627,7 +1158,7 @@ var DashReaderView = class extends import_obsidian.ItemView {
               const fileName = currentFile.name;
               if (activeView.editor.somethingSelected()) {
                 const selection = activeView.editor.getSelection();
-                if (selection && selection.length > 30) {
+                if (selection && selection.length > TEXT_LIMITS.minSelectionLength) {
                   const cursor = activeView.editor.getCursor("from");
                   const lineNumber = cursor.line + 1;
                   this.loadText(selection, { fileName, lineNumber });
@@ -635,12 +1166,12 @@ var DashReaderView = class extends import_obsidian.ItemView {
                 }
               }
               const fullContent = activeView.editor.getValue();
-              if (fullContent && fullContent.trim().length > 50) {
+              if (fullContent && fullContent.trim().length > TEXT_LIMITS.minContentLength) {
                 const cursor = activeView.editor.getCursor();
                 const cursorPosition = activeView.editor.posToOffset(cursor);
                 this.loadText(fullContent, { fileName, cursorPosition });
               }
-            }, 200);
+            }, TIMING.autoLoadDelayShort);
           }
         }
       })
@@ -651,17 +1182,10 @@ var DashReaderView = class extends import_obsidian.ItemView {
         if (this.mainContainerEl.isShown()) {
           checkSelectionOrCursor();
         }
-      }, 50);
+      }, TIMING.autoLoadDelayVeryShort);
     });
     this.registerDomEvent(document, "keyup", (evt) => {
-      const isNavigationKey = (
-        // Touches fléchées
-        evt.key === "ArrowUp" || evt.key === "ArrowDown" || evt.key === "ArrowLeft" || evt.key === "ArrowRight" || // Home/End/PageUp/PageDown
-        evt.key === "Home" || evt.key === "End" || evt.key === "PageUp" || evt.key === "PageDown" || // Enter pour nouvelle ligne
-        evt.key === "Enter" || // Vim-style (j/k pour bas/haut)
-        evt.key === "j" && evt.ctrlKey || evt.key === "k" && evt.ctrlKey || evt.key === "d" && evt.ctrlKey || evt.key === "u" && evt.ctrlKey || // Cmd/Ctrl + flèches
-        (evt.key === "ArrowUp" || evt.key === "ArrowDown") && (evt.metaKey || evt.ctrlKey)
-      );
+      const isNavigationKey = evt.key === "ArrowUp" || evt.key === "ArrowDown" || evt.key === "ArrowLeft" || evt.key === "ArrowRight" || evt.key === "Home" || evt.key === "End" || evt.key === "PageUp" || evt.key === "PageDown" || evt.key === "Enter" || evt.key === "j" && evt.ctrlKey || evt.key === "k" && evt.ctrlKey || evt.key === "d" && evt.ctrlKey || evt.key === "u" && evt.ctrlKey || (evt.key === "ArrowUp" || evt.key === "ArrowDown") && (evt.metaKey || evt.ctrlKey);
       const isSelectionKey = evt.shiftKey || evt.key === "a" && (evt.metaKey || evt.ctrlKey);
       if (isNavigationKey || isSelectionKey) {
         console.log("DashReader: Navigation key detected:", evt.key, "with modifiers:", {
@@ -673,10 +1197,10 @@ var DashReaderView = class extends import_obsidian.ItemView {
           if (this.mainContainerEl.isShown()) {
             checkSelectionOrCursor();
           }
-        }, 50);
+        }, TIMING.autoLoadDelayVeryShort);
       }
     });
-    console.log("DashReader: Auto-load setup complete (with file-open event)");
+    console.log("DashReader: Auto-load setup complete");
   }
   setupHotkeys() {
     document.addEventListener("keydown", this.handleKeyPress.bind(this));
@@ -686,12 +1210,12 @@ var DashReaderView = class extends import_obsidian.ItemView {
       return;
     if (e.key === "c" && !this.engine.getIsPlaying()) {
       e.preventDefault();
-      this.toggleControls();
+      this.togglePanel("controls");
       return;
     }
     if (e.key === "s" && !this.engine.getIsPlaying()) {
       e.preventDefault();
-      this.toggleStats();
+      this.togglePanel("stats");
       return;
     }
     const keyCode = e.code || e.key;
@@ -712,11 +1236,11 @@ var DashReaderView = class extends import_obsidian.ItemView {
         break;
       case this.settings.hotkeyIncrementWpm:
         e.preventDefault();
-        this.changeWpm(25);
+        this.changeValue("wpm", INCREMENTS.wpm);
         break;
       case this.settings.hotkeyDecrementWpm:
         e.preventDefault();
-        this.changeWpm(-25);
+        this.changeValue("wpm", -INCREMENTS.wpm);
         break;
       case this.settings.hotkeyQuit:
         e.preventDefault();
@@ -727,86 +1251,16 @@ var DashReaderView = class extends import_obsidian.ItemView {
   togglePlay() {
     if (this.engine.getIsPlaying()) {
       this.engine.pause();
-      this.updatePlayButton(false);
+      updatePlayPauseButtons(this.dom, false);
     } else {
-      if (this.startTime === 0) {
-        this.startTime = Date.now();
+      if (this.state.get("startTime") === 0) {
+        this.state.set("startTime", Date.now());
       }
       this.engine.play();
-      this.updatePlayButton(true);
-    }
-  }
-  updatePlayButton(isPlaying) {
-    const playBtn = this.controlsEl.querySelector(".play-btn");
-    const pauseBtn = this.controlsEl.querySelector(".pause-btn");
-    if (playBtn && pauseBtn) {
-      playBtn.toggleClass("hidden", isPlaying);
-      pauseBtn.toggleClass("hidden", !isPlaying);
-    }
-  }
-  changeWpm(delta) {
-    const newWpm = this.engine.getWpm() + delta;
-    this.engine.setWpm(newWpm);
-    this.settings.wpm = this.engine.getWpm();
-    if (this.wpmDisplayEl) {
-      this.wpmDisplayEl.setText(`${this.settings.wpm} WPM`);
-    }
-    const wpmValue = this.controlsEl.querySelector(".wpm-value");
-    if (wpmValue) {
-      wpmValue.setText(String(this.settings.wpm));
-    }
-  }
-  changeChunkSize(delta) {
-    const newSize = this.engine.getChunkSize() + delta;
-    this.engine.setChunkSize(newSize);
-    this.settings.chunkSize = this.engine.getChunkSize();
-    const chunkValue = this.controlsEl.querySelector(".chunk-value");
-    if (chunkValue) {
-      chunkValue.setText(String(this.settings.chunkSize));
-    }
-  }
-  changeFontSize(delta) {
-    this.settings.fontSize = Math.max(20, Math.min(120, this.settings.fontSize + delta));
-    this.wordEl.style.fontSize = `${this.settings.fontSize}px`;
-    const fontValue = this.settingsEl.querySelector(".font-value");
-    if (fontValue) {
-      fontValue.setText(String(this.settings.fontSize));
-    }
-  }
-  changeWpmInline(delta) {
-    const newWpm = this.engine.getWpm() + delta;
-    this.engine.setWpm(newWpm);
-    this.settings.wpm = this.engine.getWpm();
-    if (this.wpmDisplayEl) {
-      this.wpmDisplayEl.setText(`${this.settings.wpm} WPM`);
-    }
-    const wpmValueControls = this.controlsEl.querySelector(".wpm-value");
-    if (wpmValueControls) {
-      wpmValueControls.setText(String(this.settings.wpm));
-    }
-    const wpmValueInline = this.settingsEl.querySelector(".wpm-inline-value");
-    if (wpmValueInline) {
-      wpmValueInline.setText(String(this.settings.wpm));
-    }
-  }
-  changeAccelDuration(delta) {
-    this.settings.accelerationDuration = Math.max(10, Math.min(120, this.settings.accelerationDuration + delta));
-    this.engine.updateSettings(this.settings);
-    const accelDurationValue = this.settingsEl.querySelector(".accel-duration-value");
-    if (accelDurationValue) {
-      accelDurationValue.setText(String(this.settings.accelerationDuration));
-    }
-  }
-  changeAccelTarget(delta) {
-    this.settings.accelerationTargetWpm = Math.max(50, Math.min(1e3, this.settings.accelerationTargetWpm + delta));
-    this.engine.updateSettings(this.settings);
-    const accelTargetValue = this.settingsEl.querySelector(".accel-target-value");
-    if (accelTargetValue) {
-      accelTargetValue.setText(String(this.settings.accelerationTargetWpm));
+      updatePlayPauseButtons(this.dom, true);
     }
   }
   onWordChange(chunk) {
-    var _a;
     const headingMatch = chunk.text.match(/^\[H(\d)\]/);
     let displayText = chunk.text;
     let headingLevel = 0;
@@ -824,17 +1278,14 @@ var DashReaderView = class extends import_obsidian.ItemView {
       this.contextAfterEl.setText(context.after.join(" "));
     }
     const progress = this.engine.getProgress();
-    const progressBar = (_a = this.progressEl) == null ? void 0 : _a.querySelector(".dashreader-progress-bar");
-    if (progressBar) {
-      progressBar.style.width = `${progress}%`;
-    }
-    this.wordsRead++;
+    this.dom.updateStyle("progressBar", "width", `${progress}%`);
+    this.state.increment("wordsRead");
     this.updateStats();
   }
   displayWordWithHeading(word, headingLevel, showSeparator = false) {
     let fontSizeMultiplier = 1;
     if (headingLevel > 0) {
-      const multipliers = [0, 2, 1.75, 1.5, 1.25, 1.1, 1];
+      const multipliers = [0, HEADING_MULTIPLIERS.h1, HEADING_MULTIPLIERS.h2, HEADING_MULTIPLIERS.h3, HEADING_MULTIPLIERS.h4, HEADING_MULTIPLIERS.h5, HEADING_MULTIPLIERS.h6];
       fontSizeMultiplier = multipliers[headingLevel] || 1;
     }
     const adjustedFontSize = this.settings.fontSize * fontSizeMultiplier;
@@ -847,17 +1298,14 @@ var DashReaderView = class extends import_obsidian.ItemView {
       </div>
     `;
   }
-  escapeHtml(text) {
-    return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
-  }
   processWord(word) {
     const cleanWord = word.trim();
     const center = Math.max(Math.floor(cleanWord.length / 2) - 1, 0);
     let result = "";
     for (let i = 0; i < cleanWord.length; i++) {
-      const escapedChar = this.escapeHtml(cleanWord[i]);
+      const escapedChar = escapeHtml(cleanWord[i]);
       if (i === center) {
-        result += `<span class="dashreader-highlight" style="color: ${this.settings.highlightColor}">${escapedChar}</span>`;
+        result += `<span class="${CSS_CLASSES.highlight}" style="color: ${this.settings.highlightColor}">${escapedChar}</span>`;
       } else {
         result += escapedChar;
       }
@@ -865,36 +1313,24 @@ var DashReaderView = class extends import_obsidian.ItemView {
     return result;
   }
   onComplete() {
-    var _a;
-    this.updatePlayButton(false);
-    const statsText = (_a = this.statsEl) == null ? void 0 : _a.querySelector(".dashreader-stats-text");
-    if (statsText) {
-      statsText.setText("Completed! \u{1F389}");
-    }
+    updatePlayPauseButtons(this.dom, false);
+    this.dom.updateText("statsText", `Completed! ${ICONS.celebration}`);
   }
   updateStats() {
-    var _a;
-    const statsText = (_a = this.statsEl) == null ? void 0 : _a.querySelector(".dashreader-stats-text");
-    if (!statsText)
-      return;
     const elapsed = this.engine.getElapsedTime();
     const currentWpm = this.engine.getCurrentWpmPublic();
     const remaining = this.engine.getRemainingTime();
-    statsText.setText(
-      `${this.wordsRead}/${this.engine.getTotalWords()} words | ${this.formatTime(elapsed)} | ${currentWpm} WPM | ${this.formatTime(remaining)} left`
+    const wordsRead = this.state.get("wordsRead");
+    this.dom.updateText(
+      "statsText",
+      `${wordsRead}/${this.engine.getTotalWords()} words | ${formatTime(elapsed)} | ${currentWpm} WPM | ${formatTime(remaining)} left`
     );
   }
-  formatTime(seconds) {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, "0")}`;
-  }
   loadText(text, source) {
-    var _a;
     console.log("DashReader: loadText called with source:", source);
     if (this.engine.getIsPlaying()) {
       this.engine.stop();
-      this.updatePlayButton(false);
+      updatePlayPauseButtons(this.dom, false);
       console.log("DashReader: Stopped current reading");
     }
     console.log("DashReader: Parsing markdown, original length:", text.length);
@@ -915,52 +1351,39 @@ var DashReaderView = class extends import_obsidian.ItemView {
     } else {
       console.log("DashReader: No cursor position provided");
     }
-    if (!plainText || plainText.trim().length < 10) {
+    if (!plainText || plainText.trim().length < TEXT_LIMITS.minParsedLength) {
       console.log("DashReader: Text too short after parsing");
       return;
     }
     this.engine.setText(plainText, void 0, wordIndexFromCursor);
-    this.wordsRead = 0;
-    this.startTime = 0;
-    const welcomeMsg = this.wordEl.querySelector(".dashreader-welcome");
+    this.state.update({ wordsRead: 0, startTime: 0 });
+    const welcomeMsg = this.wordEl.querySelector(`.${CSS_CLASSES.welcome}`);
     if (welcomeMsg) {
       welcomeMsg.remove();
     }
-    this.wordEl.innerHTML = "";
+    this.wordEl.empty();
     let sourceInfo = "";
     if (source == null ? void 0 : source.fileName) {
-      const escapedFileName = this.escapeHtml(source.fileName);
+      const escapedFileName = escapeHtml(source.fileName);
       const lineInfo = source.lineNumber ? ` (line ${source.lineNumber})` : "";
       sourceInfo = `<div style="font-size: 14px; opacity: 0.6; margin-bottom: 8px;">
-        \u{1F4C4} ${escapedFileName}${lineInfo}
+        ${ICONS.file} ${escapedFileName}${lineInfo}
       </div>`;
     }
     const totalWords = this.engine.getTotalWords();
     const remainingWords = this.engine.getRemainingWords();
     const estimatedDuration = this.engine.getEstimatedDuration();
-    const durationText = this.formatTime(estimatedDuration);
-    const statsText = (_a = this.statsEl) == null ? void 0 : _a.querySelector(".dashreader-stats-text");
-    if (statsText) {
-      const fileInfo = (source == null ? void 0 : source.fileName) ? ` from ${source.fileName}` : "";
-      const wordInfo = wordIndexFromCursor && wordIndexFromCursor > 0 ? `${remainingWords}/${totalWords} words` : `${totalWords} words`;
-      statsText.setText(`${wordInfo} loaded${fileInfo} - ~${durationText} - Shift+Space to start`);
-    }
-    const startInfo = wordIndexFromCursor !== void 0 && wordIndexFromCursor > 0 ? ` <span style="opacity: 0.6;">(starting at word ${wordIndexFromCursor + 1}/${totalWords})</span>` : "";
-    console.log("DashReader: Start info display:", startInfo);
+    const durationText = formatTime(estimatedDuration);
+    const fileInfo = (source == null ? void 0 : source.fileName) ? ` from ${source.fileName}` : "";
+    const wordInfo = wordIndexFromCursor && wordIndexFromCursor > 0 ? `${remainingWords}/${totalWords} words` : `${totalWords} words`;
+    this.dom.updateText("statsText", `${wordInfo} loaded${fileInfo} - ~${durationText} - Shift+Space to start`);
+    this.wordEl.innerHTML = createReadyMessage(remainingWords, totalWords, wordIndexFromCursor, durationText, sourceInfo);
     console.log("DashReader: Words to read:", remainingWords, "out of", totalWords);
-    this.wordEl.innerHTML = `
-      <div style="font-size: 18px; color: var(--text-muted); text-align: center;">
-        ${sourceInfo}
-        Ready to read ${remainingWords} words${startInfo}<br/>
-        <span style="font-size: 14px; opacity: 0.7;">Estimated time: ~${durationText}</span><br/>
-        <span style="font-size: 14px; opacity: 0.7;">Press Shift+Space to start</span>
-      </div>
-    `;
     if (this.settings.autoStart) {
       setTimeout(() => {
         this.engine.play();
-        this.updatePlayButton(true);
-        this.startTime = Date.now();
+        updatePlayPauseButtons(this.dom, true);
+        this.state.set("startTime", Date.now());
       }, this.settings.autoStartDelay * 1e3);
     }
   }
@@ -972,12 +1395,11 @@ var DashReaderView = class extends import_obsidian.ItemView {
       this.wordEl.style.fontFamily = settings.fontFamily;
       this.wordEl.style.color = settings.fontColor;
     }
-    if (this.wpmDisplayEl) {
-      this.wpmDisplayEl.setText(`${settings.wpm} WPM`);
-    }
+    this.dom.updateText("wpmDisplay", `${settings.wpm} WPM`);
   }
   async onClose() {
     this.engine.stop();
+    this.dom.clear();
   }
 };
 
