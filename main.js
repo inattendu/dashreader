@@ -51,7 +51,7 @@ var RSVPEngine = class {
   }
   setText(text, startPosition, startWordIndex) {
     console.log("DashReader Engine: setText called with startPosition:", startPosition, "startWordIndex:", startWordIndex);
-    const cleaned = text.replace(/\s+/g, " ").replace(/\n+/g, " \xA7\xA7LINEBREAK\xA7\xA7 ").trim();
+    const cleaned = text.replace(/\n+/g, " \xA7\xA7LINEBREAK\xA7\xA7 ").replace(/[ \t]+/g, " ").trim();
     this.words = cleaned.split(/\s+/);
     console.log("DashReader Engine: Total words after split:", this.words.length);
     this.extractHeadings();

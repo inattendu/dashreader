@@ -29,10 +29,10 @@ export class RSVPEngine {
     console.log('DashReader Engine: setText called with startPosition:', startPosition, 'startWordIndex:', startWordIndex);
 
     // Nettoyer et diviser le texte en mots
-    // Important: preserve line breaks by replacing them with a marker before splitting
+    // Important: preserve line breaks by replacing them with a marker FIRST
     const cleaned = text
-      .replace(/\s+/g, ' ')
-      .replace(/\n+/g, ' §§LINEBREAK§§ ')
+      .replace(/\n+/g, ' §§LINEBREAK§§ ')  // Replace line breaks FIRST
+      .replace(/[ \t]+/g, ' ')              // Then clean up spaces/tabs (NOT \n!)
       .trim();
 
     this.words = cleaned.split(/\s+/);
