@@ -927,6 +927,15 @@ var AutoLoadManager = class {
 // src/rsvp-view.ts
 var VIEW_TYPE_DASHREADER = "dashreader-view";
 var DashReaderView = class extends import_obsidian2.ItemView {
+  // ──────────────────────────────────────────────────────────────────────
+  // Constructor
+  // ──────────────────────────────────────────────────────────────────────
+  /**
+   * Creates a new DashReaderView instance
+   *
+   * @param leaf - Obsidian workspace leaf to attach to
+   * @param settings - Plugin settings
+   */
   constructor(leaf, settings) {
     super(leaf);
     this.settings = settings;
@@ -950,15 +959,34 @@ var DashReaderView = class extends import_obsidian2.ItemView {
       }
     );
   }
+  // ──────────────────────────────────────────────────────────────────────
+  // Obsidian View Lifecycle
+  // ──────────────────────────────────────────────────────────────────────
+  /**
+   * Returns the unique view type identifier
+   * @returns View type string
+   */
   getViewType() {
     return VIEW_TYPE_DASHREADER;
   }
+  /**
+   * Returns the display name shown in Obsidian UI
+   * @returns Display name
+   */
   getDisplayText() {
     return "DashReader";
   }
+  /**
+   * Returns the icon identifier for this view
+   * @returns Icon name
+   */
   getIcon() {
     return "zap";
   }
+  /**
+   * Called when the view is opened
+   * Builds UI, sets up hotkeys, and registers auto-load
+   */
   async onOpen() {
     this.mainContainerEl = this.contentEl.createDiv({ cls: CSS_CLASSES.container });
     this.buildUI();
@@ -967,6 +995,23 @@ var DashReaderView = class extends import_obsidian2.ItemView {
       this.setupAutoLoad();
     });
   }
+  /**
+   * Called when the view is closed
+   * Stops reading and cleans up resources
+   */
+  async onClose() {
+    this.engine.stop();
+    this.dom.clear();
+  }
+  // ============================================================================
+  // SECTION 3: UI CONSTRUCTION
+  // ============================================================================
+  /**
+   * Orchestrates the construction of all UI components
+   * Called once during view initialization
+   *
+   * Order matters: toggle bar, stats, display, progress, controls, settings
+   */
   buildUI() {
     this.buildToggleBar();
     this.buildStats();
@@ -975,6 +1020,10 @@ var DashReaderView = class extends import_obsidian2.ItemView {
     this.buildControls();
     this.buildInlineSettings();
   }
+  /**
+   * Builds the toggle bar with settings and stats buttons
+   * Located at the top of the view
+   */
   buildToggleBar() {
     this.toggleBar = this.mainContainerEl.createDiv({ cls: CSS_CLASSES.toggleBar });
     createButton(this.toggleBar, {
@@ -990,6 +1039,10 @@ var DashReaderView = class extends import_obsidian2.ItemView {
       className: CSS_CLASSES.toggleBtn
     });
   }
+  /**
+   * Builds the statistics display panel
+   * Shows WPM, words read, time elapsed, etc.
+   */
   buildStats() {
     this.statsEl = this.mainContainerEl.createDiv({
       cls: `${CSS_CLASSES.stats} ${CSS_CLASSES.hidden}`
@@ -1002,6 +1055,10 @@ var DashReaderView = class extends import_obsidian2.ItemView {
     statsText.setText("Ready");
     this.dom.register("statsText", statsText);
   }
+  /**
+   * Builds the main display area for word presentation
+   * Includes context before/after if enabled
+   */
   buildDisplayArea() {
     const displayArea = this.mainContainerEl.createDiv({ cls: CSS_CLASSES.display });
     if (this.settings.showContext) {
@@ -1019,6 +1076,10 @@ var DashReaderView = class extends import_obsidian2.ItemView {
       this.dom.register("contextAfterEl", this.contextAfterEl);
     }
   }
+  /**
+   * Builds the progress bar at the bottom of display
+   * Updates during reading to show progress
+   */
   buildProgressBar() {
     this.progressEl = this.mainContainerEl.createDiv({ cls: CSS_CLASSES.progressContainer });
     const progressBar = this.progressEl.createDiv({ cls: CSS_CLASSES.progressBar });
@@ -1026,6 +1087,10 @@ var DashReaderView = class extends import_obsidian2.ItemView {
     progressBar.style.background = this.settings.highlightColor;
     this.dom.register("progressBar", progressBar);
   }
+  /**
+   * Builds the playback controls panel
+   * Includes play/pause, rewind, forward, stop, WPM, and chunk size controls
+   */
   buildControls() {
     this.controlsEl = this.mainContainerEl.createDiv({
       cls: `${CSS_CLASSES.controls} ${CSS_CLASSES.hidden}`
@@ -1072,6 +1137,10 @@ var DashReaderView = class extends import_obsidian2.ItemView {
       this.dom
     );
   }
+  /**
+   * Builds the inline settings panel
+   * Allows quick adjustments to WPM, acceleration, font size, etc.
+   */
   buildInlineSettings() {
     this.settingsEl = this.mainContainerEl.createDiv({
       cls: `${CSS_CLASSES.settings} ${CSS_CLASSES.hidden}`
@@ -1091,7 +1160,7 @@ var DashReaderView = class extends import_obsidian2.ItemView {
       },
       this.dom
     );
-    const accelToggle = createToggleControl(this.settingsEl, {
+    createToggleControl(this.settingsEl, {
       label: "Speed Acceleration",
       checked: this.settings.enableAcceleration,
       onChange: (checked) => {
@@ -1161,8 +1230,15 @@ var DashReaderView = class extends import_obsidian2.ItemView {
       }
     });
   }
+  // ============================================================================
+  // SECTION 4: USER INTERACTIONS
+  // ============================================================================
   /**
-   * Unified value change handler - replaces all changeWpm*, changeFontSize, etc.
+   * Unified value change handler
+   * Replaces 5 separate change functions (changeWpm, changeWpmInline, etc.)
+   *
+   * @param type - Type of value to change
+   * @param delta - Amount to change (positive or negative)
    */
   changeValue(type, delta) {
     switch (type) {
@@ -1220,7 +1296,10 @@ var DashReaderView = class extends import_obsidian2.ItemView {
     }
   }
   /**
-   * Unified panel toggle - replaces toggleControls, toggleStats, toggleSettings
+   * Unified panel toggle handler
+   * Replaces 3 separate toggle functions (toggleControls, toggleStats, etc.)
+   *
+   * @param panel - Panel to toggle ('controls' or 'stats')
    */
   togglePanel(panel) {
     if (panel === "controls") {
@@ -1234,6 +1313,9 @@ var DashReaderView = class extends import_obsidian2.ItemView {
       this.statsEl.toggleClass(CSS_CLASSES.hidden, !showing);
     }
   }
+  /**
+   * Toggles the visibility of context before/after current word
+   */
   toggleContextDisplay() {
     const display = this.settings.showContext ? "block" : "none";
     if (this.contextBeforeEl) {
@@ -1243,9 +1325,19 @@ var DashReaderView = class extends import_obsidian2.ItemView {
       this.contextAfterEl.style.display = display;
     }
   }
+  // ============================================================================
+  // SECTION 5: AUTO-LOAD SYSTEM
+  // ============================================================================
   /**
-   * Setup automatic text loading from editor
-   * Extracted into AutoLoadManager for better maintainability
+   * Sets up automatic text loading from editor
+   *
+   * Registers event handlers for:
+   * - file-open: Load text when opening a file
+   * - active-leaf-change: Load text when switching files
+   * - mouseup: Check for selection/cursor changes
+   * - keyup: Check for navigation/selection keys
+   *
+   * Actual tracking logic is encapsulated in AutoLoadManager
    */
   setupAutoLoad() {
     this.registerEvent(
@@ -1293,9 +1385,27 @@ var DashReaderView = class extends import_obsidian2.ItemView {
     });
     console.log("DashReader: Auto-load setup complete");
   }
+  // ============================================================================
+  // SECTION 6: HOTKEYS & KEYBOARD
+  // ============================================================================
+  /**
+   * Sets up keyboard shortcuts for playback control
+   */
   setupHotkeys() {
     document.addEventListener("keydown", this.handleKeyPress.bind(this));
   }
+  /**
+   * Handles keyboard shortcuts
+   *
+   * Shortcuts:
+   * - C: Toggle controls (when not playing)
+   * - S: Toggle stats (when not playing)
+   * - Shift+Space: Play/Pause
+   * - Arrow keys: Rewind/Forward, WPM adjustment
+   * - Escape: Stop reading
+   *
+   * @param e - Keyboard event
+   */
   handleKeyPress(e) {
     if (!this.mainContainerEl.isShown())
       return;
@@ -1339,6 +1449,10 @@ var DashReaderView = class extends import_obsidian2.ItemView {
         break;
     }
   }
+  /**
+   * Toggles play/pause state
+   * Updates UI buttons accordingly
+   */
   togglePlay() {
     if (this.engine.getIsPlaying()) {
       this.engine.pause();
@@ -1351,6 +1465,15 @@ var DashReaderView = class extends import_obsidian2.ItemView {
       updatePlayPauseButtons(this.dom, true);
     }
   }
+  // ============================================================================
+  // SECTION 7: READING ENGINE CALLBACKS
+  // ============================================================================
+  /**
+   * Called by engine when a new word is displayed
+   * Updates the UI with the current word, context, progress, and stats
+   *
+   * @param chunk - Word chunk with text, index, delay info
+   */
   onWordChange(chunk) {
     const headingMatch = chunk.text.match(/^\[H(\d)\]/);
     let displayText = chunk.text;
@@ -1373,10 +1496,25 @@ var DashReaderView = class extends import_obsidian2.ItemView {
     this.state.increment("wordsRead");
     this.updateStats();
   }
+  /**
+   * Displays a word with heading-based font size adjustment
+   *
+   * @param word - Word to display
+   * @param headingLevel - Heading level (1-6) or 0 for normal text
+   * @param showSeparator - Whether to show separator line before heading
+   */
   displayWordWithHeading(word, headingLevel, showSeparator = false) {
     let fontSizeMultiplier = 1;
     if (headingLevel > 0) {
-      const multipliers = [0, HEADING_MULTIPLIERS.h1, HEADING_MULTIPLIERS.h2, HEADING_MULTIPLIERS.h3, HEADING_MULTIPLIERS.h4, HEADING_MULTIPLIERS.h5, HEADING_MULTIPLIERS.h6];
+      const multipliers = [
+        0,
+        HEADING_MULTIPLIERS.h1,
+        HEADING_MULTIPLIERS.h2,
+        HEADING_MULTIPLIERS.h3,
+        HEADING_MULTIPLIERS.h4,
+        HEADING_MULTIPLIERS.h5,
+        HEADING_MULTIPLIERS.h6
+      ];
       fontSizeMultiplier = multipliers[headingLevel] || 1;
     }
     const adjustedFontSize = this.settings.fontSize * fontSizeMultiplier;
@@ -1389,6 +1527,13 @@ var DashReaderView = class extends import_obsidian2.ItemView {
       </div>
     `;
   }
+  /**
+   * Processes a word for display with center character highlighting
+   * Escapes HTML to prevent XSS attacks
+   *
+   * @param word - Word to process
+   * @returns HTML string with highlighted center character
+   */
   processWord(word) {
     const cleanWord = word.trim();
     const center = Math.max(Math.floor(cleanWord.length / 2) - 1, 0);
@@ -1403,10 +1548,18 @@ var DashReaderView = class extends import_obsidian2.ItemView {
     }
     return result;
   }
+  /**
+   * Called by engine when reading is complete
+   * Updates UI to show completion message
+   */
   onComplete() {
     updatePlayPauseButtons(this.dom, false);
     this.dom.updateText("statsText", `Completed! ${ICONS.celebration}`);
   }
+  /**
+   * Updates the stats display with current reading statistics
+   * Shows: words read, elapsed time, current WPM, remaining time
+   */
   updateStats() {
     const elapsed = this.engine.getElapsedTime();
     const currentWpm = this.engine.getCurrentWpmPublic();
@@ -1417,6 +1570,24 @@ var DashReaderView = class extends import_obsidian2.ItemView {
       `${wordsRead}/${this.engine.getTotalWords()} words | ${formatTime(elapsed)} | ${currentWpm} WPM | ${formatTime(remaining)} left`
     );
   }
+  // ============================================================================
+  // SECTION 8: TEXT LOADING
+  // ============================================================================
+  /**
+   * Loads text for reading
+   *
+   * Process:
+   * 1. Stop current reading if playing
+   * 2. Parse markdown to plain text
+   * 3. Calculate word index from cursor position (if provided)
+   * 4. Validate text length
+   * 5. Load into engine
+   * 6. Update UI with ready message
+   * 7. Auto-start if enabled
+   *
+   * @param text - Text to load (raw markdown)
+   * @param source - Optional source information (filename, line, cursor position)
+   */
   loadText(text, source) {
     console.log("DashReader: loadText called with source:", source);
     if (this.engine.getIsPlaying()) {
@@ -1478,6 +1649,15 @@ var DashReaderView = class extends import_obsidian2.ItemView {
       }, this.settings.autoStartDelay * 1e3);
     }
   }
+  // ============================================================================
+  // SECTION 9: SETTINGS & LIFECYCLE
+  // ============================================================================
+  /**
+   * Updates settings from plugin settings tab
+   * Called when user changes settings in main settings panel
+   *
+   * @param settings - New settings
+   */
   updateSettings(settings) {
     this.settings = settings;
     this.engine.updateSettings(settings);
@@ -1487,10 +1667,6 @@ var DashReaderView = class extends import_obsidian2.ItemView {
       this.wordEl.style.color = settings.fontColor;
     }
     this.dom.updateText("wpmDisplay", `${settings.wpm} WPM`);
-  }
-  async onClose() {
-    this.engine.stop();
-    this.dom.clear();
   }
 };
 

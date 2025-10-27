@@ -1,4 +1,58 @@
-import { ItemView, WorkspaceLeaf, MarkdownView, Menu, Editor } from 'obsidian';
+/**
+ * @file rsvp-view.ts
+ * @description Main view component for DashReader RSVP speed reading
+ *
+ * ARCHITECTURE:
+ * This view implements a clean separation of concerns using utility classes:
+ * - ViewState: Centralized reactive state management with event emission
+ * - DOMRegistry: Efficient DOM element caching and batch updates
+ * - AutoLoadManager: Automatic text loading from editor with cursor tracking
+ * - UI Builders: Reusable component factories for consistent UI
+ *
+ * OUTLINE:
+ * ├─ 1. IMPORTS & CONSTANTS
+ * ├─ 2. CLASS DEFINITION
+ * │  ├─ Properties & Constructor
+ * │  └─ Obsidian View Lifecycle
+ * ├─ 3. UI CONSTRUCTION
+ * │  ├─ buildUI() orchestrator
+ * │  ├─ buildToggleBar()
+ * │  ├─ buildStats()
+ * │  ├─ buildDisplayArea()
+ * │  ├─ buildProgressBar()
+ * │  ├─ buildControls()
+ * │  └─ buildInlineSettings()
+ * ├─ 4. USER INTERACTIONS
+ * │  ├─ changeValue() - Unified value changes
+ * │  ├─ togglePanel() - Panel visibility
+ * │  └─ toggleContextDisplay()
+ * ├─ 5. AUTO-LOAD SYSTEM
+ * │  └─ setupAutoLoad() - Event registration
+ * ├─ 6. HOTKEYS & KEYBOARD
+ * │  ├─ setupHotkeys()
+ * │  ├─ handleKeyPress()
+ * │  └─ togglePlay()
+ * ├─ 7. READING ENGINE CALLBACKS
+ * │  ├─ onWordChange()
+ * │  ├─ displayWordWithHeading()
+ * │  ├─ processWord()
+ * │  ├─ onComplete()
+ * │  └─ updateStats()
+ * ├─ 8. TEXT LOADING
+ * │  └─ loadText() - Main text loading method
+ * └─ 9. SETTINGS & LIFECYCLE
+ *    ├─ updateSettings()
+ *    └─ onClose()
+ *
+ * @author DashReader Team
+ * @version 2.0.0 - Refactored for maintainability
+ */
+
+// ============================================================================
+// SECTION 1: IMPORTS & CONSTANTS
+// ============================================================================
+
+import { ItemView, WorkspaceLeaf, MarkdownView } from 'obsidian';
 import { RSVPEngine } from './rsvp-engine';
 import { DashReaderSettings, WordChunk } from './types';
 import { MarkdownParser } from './markdown-parser';
@@ -28,42 +82,107 @@ import { AutoLoadManager, isNavigationKey, isSelectionKey } from './auto-load-ma
 
 export const VIEW_TYPE_DASHREADER = 'dashreader-view';
 
+// ============================================================================
+// SECTION 2: CLASS DEFINITION
+// ============================================================================
+
+/**
+ * Main view component for DashReader RSVP speed reading
+ *
+ * Implements Obsidian's ItemView interface to provide a custom view for
+ * displaying text word-by-word at configurable speeds (WPM).
+ *
+ * @extends ItemView
+ */
 export class DashReaderView extends ItemView {
+  // ──────────────────────────────────────────────────────────────────────
+  // Core Dependencies
+  // ──────────────────────────────────────────────────────────────────────
+
+  /** RSVP reading engine - handles word iteration and timing */
   private engine: RSVPEngine;
+
+  /** Plugin settings (WPM, font size, colors, etc.) */
   private settings: DashReaderSettings;
+
+  /** Centralized reactive state manager */
   private state: ViewState;
+
+  /** DOM element registry for efficient updates */
   private dom: DOMRegistry;
+
+  /** Automatic text loading from editor */
   private autoLoadManager: AutoLoadManager;
 
-  // Main container elements (created once, stored for lifecycle)
+  // ──────────────────────────────────────────────────────────────────────
+  // DOM Element References
+  // ──────────────────────────────────────────────────────────────────────
+
+  /** Main container element */
   private mainContainerEl: HTMLElement;
+
+  /** Toggle buttons bar (settings, stats) */
   private toggleBar: HTMLElement;
+
+  /** Main word display area */
   private wordEl: HTMLElement;
+
+  /** Context before current word */
   private contextBeforeEl: HTMLElement;
+
+  /** Context after current word */
   private contextAfterEl: HTMLElement;
+
+  /** Controls panel (play, pause, etc.) */
   private controlsEl: HTMLElement;
+
+  /** Settings panel (inline configuration) */
   private settingsEl: HTMLElement;
+
+  /** Progress bar container */
   private progressEl: HTMLElement;
+
+  /** Stats display panel */
   private statsEl: HTMLElement;
 
-  // Conditional group elements (need direct reference for show/hide)
+  /** Acceleration duration control group (shown conditionally) */
   private accelDurationGroup: HTMLElement;
+
+  /** Acceleration target WPM control group (shown conditionally) */
   private accelTargetGroup: HTMLElement;
 
+  // ──────────────────────────────────────────────────────────────────────
+  // Constructor
+  // ──────────────────────────────────────────────────────────────────────
+
+  /**
+   * Creates a new DashReaderView instance
+   *
+   * @param leaf - Obsidian workspace leaf to attach to
+   * @param settings - Plugin settings
+   */
   constructor(leaf: WorkspaceLeaf, settings: DashReaderSettings) {
     super(leaf);
     this.settings = settings;
+
+    // Initialize state manager with current settings
     this.state = new ViewState({
       currentWpm: settings.wpm,
       currentChunkSize: settings.chunkSize,
       currentFontSize: settings.fontSize,
     });
+
+    // Initialize DOM registry for efficient element updates
     this.dom = new DOMRegistry();
+
+    // Initialize RSVP engine with callbacks
     this.engine = new RSVPEngine(
       settings,
       this.onWordChange.bind(this),
       this.onComplete.bind(this)
     );
+
+    // Initialize auto-load manager for editor integration
     this.autoLoadManager = new AutoLoadManager(
       this.app,
       this.loadText.bind(this),
@@ -71,18 +190,38 @@ export class DashReaderView extends ItemView {
     );
   }
 
+  // ──────────────────────────────────────────────────────────────────────
+  // Obsidian View Lifecycle
+  // ──────────────────────────────────────────────────────────────────────
+
+  /**
+   * Returns the unique view type identifier
+   * @returns View type string
+   */
   getViewType(): string {
     return VIEW_TYPE_DASHREADER;
   }
 
+  /**
+   * Returns the display name shown in Obsidian UI
+   * @returns Display name
+   */
   getDisplayText(): string {
     return 'DashReader';
   }
 
+  /**
+   * Returns the icon identifier for this view
+   * @returns Icon name
+   */
   getIcon(): string {
     return 'zap';
   }
 
+  /**
+   * Called when the view is opened
+   * Builds UI, sets up hotkeys, and registers auto-load
+   */
   async onOpen(): Promise<void> {
     this.mainContainerEl = this.contentEl.createDiv({ cls: CSS_CLASSES.container });
     this.buildUI();
@@ -94,6 +233,25 @@ export class DashReaderView extends ItemView {
     });
   }
 
+  /**
+   * Called when the view is closed
+   * Stops reading and cleans up resources
+   */
+  async onClose(): Promise<void> {
+    this.engine.stop();
+    this.dom.clear();
+  }
+
+  // ============================================================================
+  // SECTION 3: UI CONSTRUCTION
+  // ============================================================================
+
+  /**
+   * Orchestrates the construction of all UI components
+   * Called once during view initialization
+   *
+   * Order matters: toggle bar, stats, display, progress, controls, settings
+   */
   private buildUI(): void {
     this.buildToggleBar();
     this.buildStats();
@@ -103,6 +261,10 @@ export class DashReaderView extends ItemView {
     this.buildInlineSettings();
   }
 
+  /**
+   * Builds the toggle bar with settings and stats buttons
+   * Located at the top of the view
+   */
   private buildToggleBar(): void {
     this.toggleBar = this.mainContainerEl.createDiv({ cls: CSS_CLASSES.toggleBar });
 
@@ -121,6 +283,10 @@ export class DashReaderView extends ItemView {
     });
   }
 
+  /**
+   * Builds the statistics display panel
+   * Shows WPM, words read, time elapsed, etc.
+   */
   private buildStats(): void {
     this.statsEl = this.mainContainerEl.createDiv({
       cls: `${CSS_CLASSES.stats} ${CSS_CLASSES.hidden}`,
@@ -136,10 +302,14 @@ export class DashReaderView extends ItemView {
     this.dom.register('statsText', statsText);
   }
 
+  /**
+   * Builds the main display area for word presentation
+   * Includes context before/after if enabled
+   */
   private buildDisplayArea(): void {
     const displayArea = this.mainContainerEl.createDiv({ cls: CSS_CLASSES.display });
 
-    // Context before
+    // Context before (optional)
     if (this.settings.showContext) {
       this.contextBeforeEl = displayArea.createDiv({ cls: CSS_CLASSES.contextBefore });
       this.dom.register('contextBeforeEl', this.contextBeforeEl);
@@ -153,13 +323,17 @@ export class DashReaderView extends ItemView {
     this.wordEl.innerHTML = createWelcomeMessage();
     this.dom.register('wordEl', this.wordEl);
 
-    // Context after
+    // Context after (optional)
     if (this.settings.showContext) {
       this.contextAfterEl = displayArea.createDiv({ cls: CSS_CLASSES.contextAfter });
       this.dom.register('contextAfterEl', this.contextAfterEl);
     }
   }
 
+  /**
+   * Builds the progress bar at the bottom of display
+   * Updates during reading to show progress
+   */
   private buildProgressBar(): void {
     this.progressEl = this.mainContainerEl.createDiv({ cls: CSS_CLASSES.progressContainer });
     const progressBar = this.progressEl.createDiv({ cls: CSS_CLASSES.progressBar });
@@ -168,6 +342,10 @@ export class DashReaderView extends ItemView {
     this.dom.register('progressBar', progressBar);
   }
 
+  /**
+   * Builds the playback controls panel
+   * Includes play/pause, rewind, forward, stop, WPM, and chunk size controls
+   */
   private buildControls(): void {
     this.controlsEl = this.mainContainerEl.createDiv({
       cls: `${CSS_CLASSES.controls} ${CSS_CLASSES.hidden}`,
@@ -225,13 +403,17 @@ export class DashReaderView extends ItemView {
     );
   }
 
+  /**
+   * Builds the inline settings panel
+   * Allows quick adjustments to WPM, acceleration, font size, etc.
+   */
   private buildInlineSettings(): void {
     this.settingsEl = this.mainContainerEl.createDiv({
       cls: `${CSS_CLASSES.settings} ${CSS_CLASSES.hidden}`,
     });
     this.dom.register('settingsEl', this.settingsEl);
 
-    // WPM control
+    // WPM control (duplicate for inline settings)
     createNumberControl(
       this.settingsEl,
       {
@@ -248,7 +430,7 @@ export class DashReaderView extends ItemView {
     );
 
     // Acceleration toggle
-    const accelToggle = createToggleControl(this.settingsEl, {
+    createToggleControl(this.settingsEl, {
       label: 'Speed Acceleration',
       checked: this.settings.enableAcceleration,
       onChange: (checked) => {
@@ -329,8 +511,16 @@ export class DashReaderView extends ItemView {
     });
   }
 
+  // ============================================================================
+  // SECTION 4: USER INTERACTIONS
+  // ============================================================================
+
   /**
-   * Unified value change handler - replaces all changeWpm*, changeFontSize, etc.
+   * Unified value change handler
+   * Replaces 5 separate change functions (changeWpm, changeWpmInline, etc.)
+   *
+   * @param type - Type of value to change
+   * @param delta - Amount to change (positive or negative)
    */
   private changeValue(
     type: 'wpm' | 'chunkSize' | 'fontSize' | 'accelDuration' | 'accelTarget',
@@ -343,7 +533,7 @@ export class DashReaderView extends ItemView {
         this.settings.wpm = this.engine.getWpm();
         this.state.set('currentWpm', this.settings.wpm);
 
-        // Update all WPM displays
+        // Update all WPM displays (3 locations)
         this.dom.updateMultipleText({
           wpmDisplay: `${this.settings.wpm} WPM`,
           wpmValue: String(this.settings.wpm),
@@ -398,7 +588,10 @@ export class DashReaderView extends ItemView {
   }
 
   /**
-   * Unified panel toggle - replaces toggleControls, toggleStats, toggleSettings
+   * Unified panel toggle handler
+   * Replaces 3 separate toggle functions (toggleControls, toggleStats, etc.)
+   *
+   * @param panel - Panel to toggle ('controls' or 'stats')
    */
   private togglePanel(panel: 'controls' | 'stats'): void {
     if (panel === 'controls') {
@@ -413,6 +606,9 @@ export class DashReaderView extends ItemView {
     }
   }
 
+  /**
+   * Toggles the visibility of context before/after current word
+   */
   private toggleContextDisplay(): void {
     const display = this.settings.showContext ? 'block' : 'none';
     if (this.contextBeforeEl) {
@@ -423,9 +619,20 @@ export class DashReaderView extends ItemView {
     }
   }
 
+  // ============================================================================
+  // SECTION 5: AUTO-LOAD SYSTEM
+  // ============================================================================
+
   /**
-   * Setup automatic text loading from editor
-   * Extracted into AutoLoadManager for better maintainability
+   * Sets up automatic text loading from editor
+   *
+   * Registers event handlers for:
+   * - file-open: Load text when opening a file
+   * - active-leaf-change: Load text when switching files
+   * - mouseup: Check for selection/cursor changes
+   * - keyup: Check for navigation/selection keys
+   *
+   * Actual tracking logic is encapsulated in AutoLoadManager
    */
   private setupAutoLoad(): void {
     // Event: file-open - Auto-load entire page
@@ -483,10 +690,29 @@ export class DashReaderView extends ItemView {
     console.log('DashReader: Auto-load setup complete');
   }
 
+  // ============================================================================
+  // SECTION 6: HOTKEYS & KEYBOARD
+  // ============================================================================
+
+  /**
+   * Sets up keyboard shortcuts for playback control
+   */
   private setupHotkeys(): void {
     document.addEventListener('keydown', this.handleKeyPress.bind(this));
   }
 
+  /**
+   * Handles keyboard shortcuts
+   *
+   * Shortcuts:
+   * - C: Toggle controls (when not playing)
+   * - S: Toggle stats (when not playing)
+   * - Shift+Space: Play/Pause
+   * - Arrow keys: Rewind/Forward, WPM adjustment
+   * - Escape: Stop reading
+   *
+   * @param e - Keyboard event
+   */
   private handleKeyPress(e: KeyboardEvent): void {
     if (!this.mainContainerEl.isShown()) return;
 
@@ -538,6 +764,10 @@ export class DashReaderView extends ItemView {
     }
   }
 
+  /**
+   * Toggles play/pause state
+   * Updates UI buttons accordingly
+   */
   private togglePlay(): void {
     if (this.engine.getIsPlaying()) {
       this.engine.pause();
@@ -551,6 +781,16 @@ export class DashReaderView extends ItemView {
     }
   }
 
+  // ============================================================================
+  // SECTION 7: READING ENGINE CALLBACKS
+  // ============================================================================
+
+  /**
+   * Called by engine when a new word is displayed
+   * Updates the UI with the current word, context, progress, and stats
+   *
+   * @param chunk - Word chunk with text, index, delay info
+   */
   private onWordChange(chunk: WordChunk): void {
     // Detect heading markers [H1], [H2], etc.
     const headingMatch = chunk.text.match(/^\[H(\d)\]/);
@@ -574,7 +814,7 @@ export class DashReaderView extends ItemView {
       this.contextAfterEl.setText(context.after.join(' '));
     }
 
-    // Update progress
+    // Update progress bar
     const progress = this.engine.getProgress();
     this.dom.updateStyle('progressBar', 'width', `${progress}%`);
 
@@ -583,11 +823,26 @@ export class DashReaderView extends ItemView {
     this.updateStats();
   }
 
+  /**
+   * Displays a word with heading-based font size adjustment
+   *
+   * @param word - Word to display
+   * @param headingLevel - Heading level (1-6) or 0 for normal text
+   * @param showSeparator - Whether to show separator line before heading
+   */
   private displayWordWithHeading(word: string, headingLevel: number, showSeparator: boolean = false): void {
     // Calculate font size based on heading level
     let fontSizeMultiplier = 1.0;
     if (headingLevel > 0) {
-      const multipliers = [0, HEADING_MULTIPLIERS.h1, HEADING_MULTIPLIERS.h2, HEADING_MULTIPLIERS.h3, HEADING_MULTIPLIERS.h4, HEADING_MULTIPLIERS.h5, HEADING_MULTIPLIERS.h6];
+      const multipliers = [
+        0,
+        HEADING_MULTIPLIERS.h1,
+        HEADING_MULTIPLIERS.h2,
+        HEADING_MULTIPLIERS.h3,
+        HEADING_MULTIPLIERS.h4,
+        HEADING_MULTIPLIERS.h5,
+        HEADING_MULTIPLIERS.h6
+      ];
       fontSizeMultiplier = multipliers[headingLevel] || 1.0;
     }
 
@@ -606,6 +861,13 @@ export class DashReaderView extends ItemView {
     `;
   }
 
+  /**
+   * Processes a word for display with center character highlighting
+   * Escapes HTML to prevent XSS attacks
+   *
+   * @param word - Word to process
+   * @returns HTML string with highlighted center character
+   */
   private processWord(word: string): string {
     const cleanWord = word.trim();
     const center = Math.max(Math.floor(cleanWord.length / 2) - 1, 0);
@@ -624,11 +886,19 @@ export class DashReaderView extends ItemView {
     return result;
   }
 
+  /**
+   * Called by engine when reading is complete
+   * Updates UI to show completion message
+   */
   private onComplete(): void {
     updatePlayPauseButtons(this.dom, false);
     this.dom.updateText('statsText', `Completed! ${ICONS.celebration}`);
   }
 
+  /**
+   * Updates the stats display with current reading statistics
+   * Shows: words read, elapsed time, current WPM, remaining time
+   */
   private updateStats(): void {
     const elapsed = this.engine.getElapsedTime();
     const currentWpm = this.engine.getCurrentWpmPublic();
@@ -641,6 +911,25 @@ export class DashReaderView extends ItemView {
     );
   }
 
+  // ============================================================================
+  // SECTION 8: TEXT LOADING
+  // ============================================================================
+
+  /**
+   * Loads text for reading
+   *
+   * Process:
+   * 1. Stop current reading if playing
+   * 2. Parse markdown to plain text
+   * 3. Calculate word index from cursor position (if provided)
+   * 4. Validate text length
+   * 5. Load into engine
+   * 6. Update UI with ready message
+   * 7. Auto-start if enabled
+   *
+   * @param text - Text to load (raw markdown)
+   * @param source - Optional source information (filename, line, cursor position)
+   */
   public loadText(text: string, source?: { fileName?: string; lineNumber?: number; cursorPosition?: number }): void {
     console.log('DashReader: loadText called with source:', source);
 
@@ -651,7 +940,7 @@ export class DashReaderView extends ItemView {
       console.log('DashReader: Stopped current reading');
     }
 
-    // Parse markdown FIRST
+    // Parse markdown FIRST (remove syntax, keep content)
     console.log('DashReader: Parsing markdown, original length:', text.length);
     const plainText = MarkdownParser.parseToPlainText(text);
     console.log('DashReader: After parsing, length:', plainText.length);
@@ -662,9 +951,11 @@ export class DashReaderView extends ItemView {
     if (source?.cursorPosition !== undefined) {
       console.log('DashReader: Cursor position detected:', source.cursorPosition);
 
+      // Parse text up to cursor position
       const textUpToCursor = text.substring(0, source.cursorPosition);
       const parsedUpToCursor = MarkdownParser.parseToPlainText(textUpToCursor);
 
+      // Count words in parsed text (not raw markdown)
       const wordsBeforeCursor = parsedUpToCursor.trim().split(/\s+/).filter(w => w.length > 0);
       wordIndexFromCursor = wordsBeforeCursor.length;
 
@@ -694,7 +985,7 @@ export class DashReaderView extends ItemView {
 
     this.wordEl.empty();
 
-    // Prepare source info
+    // Prepare source info for display
     let sourceInfo = '';
     if (source?.fileName) {
       const escapedFileName = escapeHtml(source.fileName);
@@ -732,6 +1023,16 @@ export class DashReaderView extends ItemView {
     }
   }
 
+  // ============================================================================
+  // SECTION 9: SETTINGS & LIFECYCLE
+  // ============================================================================
+
+  /**
+   * Updates settings from plugin settings tab
+   * Called when user changes settings in main settings panel
+   *
+   * @param settings - New settings
+   */
   public updateSettings(settings: DashReaderSettings): void {
     this.settings = settings;
     this.engine.updateSettings(settings);
@@ -743,10 +1044,5 @@ export class DashReaderView extends ItemView {
     }
 
     this.dom.updateText('wpmDisplay', `${settings.wpm} WPM`);
-  }
-
-  async onClose(): Promise<void> {
-    this.engine.stop();
-    this.dom.clear();
   }
 }
