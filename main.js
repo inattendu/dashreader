@@ -51,11 +51,14 @@ var RSVPEngine = class {
   }
   setText(text, startPosition, startWordIndex) {
     console.log("DashReader Engine: setText called with startPosition:", startPosition, "startWordIndex:", startWordIndex);
-    const cleaned = text.replace(/\s+/g, " ").replace(/\n+/g, "\n").trim();
+    const cleaned = text.replace(/\s+/g, " ").replace(/\n+/g, " \xA7\xA7LINEBREAK\xA7\xA7 ").trim();
     this.words = cleaned.split(/\s+/);
     console.log("DashReader Engine: Total words after split:", this.words.length);
     this.extractHeadings();
     console.log("DashReader Engine: Extracted", this.headings.length, "headings");
+    this.words = this.words.map(
+      (word) => word === "\xA7\xA7LINEBREAK\xA7\xA7" ? "\n" : word
+    );
     if (startWordIndex !== void 0) {
       this.currentIndex = Math.max(0, Math.min(startWordIndex, this.words.length - 1));
       console.log("DashReader Engine: Starting at word index", this.currentIndex, "/", this.words.length, "(from startWordIndex)");
@@ -244,13 +247,10 @@ var RSVPEngine = class {
         let j = i + 1;
         while (j < this.words.length) {
           const nextWord = this.words[j];
-          if (!nextWord || nextWord.trim() === "") {
+          if (nextWord === "\xA7\xA7LINEBREAK\xA7\xA7") {
             break;
           }
           if (/^\[H\d\]/.test(nextWord) || /^\[CALLOUT:/.test(nextWord)) {
-            break;
-          }
-          if (nextWord.includes("\n")) {
             break;
           }
           titleWords.push(nextWord);
@@ -275,13 +275,10 @@ var RSVPEngine = class {
         let j = i + 1;
         while (j < this.words.length) {
           const nextWord = this.words[j];
-          if (!nextWord || nextWord.trim() === "") {
+          if (nextWord === "\xA7\xA7LINEBREAK\xA7\xA7") {
             break;
           }
           if (/^\[H\d\]/.test(nextWord) || /^\[CALLOUT:/.test(nextWord)) {
-            break;
-          }
-          if (nextWord.includes("\n")) {
             break;
           }
           titleWords.push(nextWord);

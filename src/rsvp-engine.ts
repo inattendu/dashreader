@@ -29,17 +29,23 @@ export class RSVPEngine {
     console.log('DashReader Engine: setText called with startPosition:', startPosition, 'startWordIndex:', startWordIndex);
 
     // Nettoyer et diviser le texte en mots
+    // Important: preserve line breaks by replacing them with a marker before splitting
     const cleaned = text
       .replace(/\s+/g, ' ')
-      .replace(/\n+/g, '\n')
+      .replace(/\n+/g, ' §§LINEBREAK§§ ')
       .trim();
 
     this.words = cleaned.split(/\s+/);
     console.log('DashReader Engine: Total words after split:', this.words.length);
 
-    // Extraire les headings avec leur position
+    // Extraire les headings avec leur position (before replacing markers)
     this.extractHeadings();
     console.log('DashReader Engine: Extracted', this.headings.length, 'headings');
+
+    // Replace line break markers with actual line breaks for display
+    this.words = this.words.map(word =>
+      word === '§§LINEBREAK§§' ? '\n' : word
+    );
 
     // Utiliser l'index du mot si fourni (prioritaire)
     if (startWordIndex !== undefined) {
@@ -293,25 +299,20 @@ export class RSVPEngine {
         const level = parseInt(headingMatch[1]);
         const firstWord = headingMatch[2];
 
-        // Collect following words until we hit a line break or empty word
-        // Headings are single-line, so we stop at the first line break
+        // Collect following words until we hit a line break marker
+        // Headings are single-line, so we stop at §§LINEBREAK§§
         const titleWords = [firstWord];
         let j = i + 1;
         while (j < this.words.length) {
           const nextWord = this.words[j];
 
-          // Stop if empty word (line break became empty string)
-          if (!nextWord || nextWord.trim() === '') {
+          // Stop if we hit the line break marker
+          if (nextWord === '§§LINEBREAK§§') {
             break;
           }
 
           // Stop if we hit another marker
           if (/^\[H\d\]/.test(nextWord) || /^\[CALLOUT:/.test(nextWord)) {
-            break;
-          }
-
-          // Stop if word contains line break (end of heading line)
-          if (nextWord.includes('\n')) {
             break;
           }
 
@@ -341,25 +342,20 @@ export class RSVPEngine {
         const calloutType = calloutMatch[1];
         const firstWord = calloutMatch[2];
 
-        // Collect following words until we hit a line break or empty word
-        // Callout titles are single-line, so we stop at the first line break
+        // Collect following words until we hit a line break marker
+        // Callout titles are single-line, so we stop at §§LINEBREAK§§
         const titleWords = [firstWord];
         let j = i + 1;
         while (j < this.words.length) {
           const nextWord = this.words[j];
 
-          // Stop if empty word (line break became empty string)
-          if (!nextWord || nextWord.trim() === '') {
+          // Stop if we hit the line break marker
+          if (nextWord === '§§LINEBREAK§§') {
             break;
           }
 
           // Stop if we hit another marker
           if (/^\[H\d\]/.test(nextWord) || /^\[CALLOUT:/.test(nextWord)) {
-            break;
-          }
-
-          // Stop if word contains line break (end of callout title line)
-          if (nextWord.includes('\n')) {
             break;
           }
 
