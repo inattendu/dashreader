@@ -24,6 +24,7 @@ import {
   LIMITS,
   HEADING_MULTIPLIERS,
 } from './constants';
+import { AutoLoadManager, isNavigationKey, isSelectionKey } from './auto-load-manager';
 
 export const VIEW_TYPE_DASHREADER = 'dashreader-view';
 
@@ -32,6 +33,7 @@ export class DashReaderView extends ItemView {
   private settings: DashReaderSettings;
   private state: ViewState;
   private dom: DOMRegistry;
+  private autoLoadManager: AutoLoadManager;
 
   // Main container elements (created once, stored for lifecycle)
   private mainContainerEl: HTMLElement;
@@ -61,6 +63,11 @@ export class DashReaderView extends ItemView {
       settings,
       this.onWordChange.bind(this),
       this.onComplete.bind(this)
+    );
+    this.autoLoadManager = new AutoLoadManager(
+      this.app,
+      this.loadText.bind(this),
+      () => this.mainContainerEl?.isShown() ?? false
     );
   }
 
@@ -416,163 +423,50 @@ export class DashReaderView extends ItemView {
     }
   }
 
+  /**
+   * Setup automatic text loading from editor
+   * Extracted into AutoLoadManager for better maintainability
+   */
   private setupAutoLoad(): void {
-    let lastSelection = '';
-    let lastFilePath = '';
-    let lastCursorPosition = -1;
-    let lastCheckTime = 0;
-
-    const checkSelectionOrCursor = () => {
-      const now = Date.now();
-      if (now - lastCheckTime < TIMING.throttleDelay) return;
-      lastCheckTime = now;
-
-      const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-      if (!activeView) return;
-
-      const currentFile = this.app.workspace.getActiveFile();
-      if (!currentFile) return;
-
-      const fileName = currentFile.name;
-
-      // Case 1: Selection exists
-      if (activeView.editor.somethingSelected()) {
-        const selection = activeView.editor.getSelection();
-        if (selection && selection.length > TEXT_LIMITS.minSelectionLength && selection !== lastSelection) {
-          lastSelection = selection;
-          const cursor = activeView.editor.getCursor('from');
-          const lineNumber = cursor.line + 1;
-          console.log('DashReader: Auto-loading selection', selection.length, 'characters from', fileName, 'line', lineNumber);
-          this.loadText(selection, { fileName, lineNumber });
-        }
-      }
-      // Case 2: No selection - reload from cursor position
-      else {
-        const fullContent = activeView.editor.getValue();
-        if (fullContent && fullContent.trim().length > TEXT_LIMITS.minContentLength) {
-          const cursor = activeView.editor.getCursor();
-          const cursorPosition = activeView.editor.posToOffset(cursor);
-
-          if (cursorPosition !== lastCursorPosition) {
-            const positionDiff = Math.abs(cursorPosition - lastCursorPosition);
-            console.log('DashReader: Cursor moved from', lastCursorPosition, 'to', cursorPosition, '(diff:', positionDiff, ')');
-            console.log('DashReader: Reloading from cursor position', cursorPosition, 'in', fileName);
-            this.loadText(fullContent, { fileName, cursorPosition });
-            lastSelection = '';
-            lastCursorPosition = cursorPosition;
-          }
-        }
-      }
-    };
-
     // Event: file-open - Auto-load entire page
     this.registerEvent(
       this.app.workspace.on('file-open', (file) => {
         if (!file) return;
 
-        lastSelection = '';
-        lastFilePath = file.path;
-        lastCursorPosition = -1;
+        this.autoLoadManager.resetForNewFile(file.path);
         console.log('DashReader: File opened:', file.path);
-
-        setTimeout(() => {
-          if (!this.mainContainerEl.isShown()) return;
-
-          const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-          if (activeView) {
-            const fileName = file.name;
-
-            // Check for selection first
-            if (activeView.editor.somethingSelected()) {
-              const selection = activeView.editor.getSelection();
-              if (selection && selection.length > TEXT_LIMITS.minSelectionLength) {
-                const cursor = activeView.editor.getCursor('from');
-                const lineNumber = cursor.line + 1;
-                console.log('DashReader: Auto-loading selection', selection.length, 'characters from line', lineNumber);
-                this.loadText(selection, { fileName, lineNumber });
-                return;
-              }
-            }
-
-            // Otherwise load entire page from cursor position
-            const fullContent = activeView.editor.getValue();
-            if (fullContent && fullContent.trim().length > TEXT_LIMITS.minContentLength) {
-              const cursor = activeView.editor.getCursor();
-              const cursorPosition = activeView.editor.posToOffset(cursor);
-              console.log('DashReader: Auto-loading entire page from cursor position', cursorPosition);
-              this.loadText(fullContent, { fileName, cursorPosition });
-            }
-          }
-        }, TIMING.autoLoadDelay);
+        this.autoLoadManager.loadFromEditor(TIMING.autoLoadDelay);
       })
     );
 
     // Event: active-leaf-change - Backup loader
     this.registerEvent(
-      this.app.workspace.on('active-leaf-change', (leaf) => {
+      this.app.workspace.on('active-leaf-change', () => {
         if (!this.mainContainerEl || !this.mainContainerEl.isShown()) return;
 
         console.log('DashReader: Active leaf changed');
 
-        const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-        if (activeView) {
-          const currentFile = this.app.workspace.getActiveFile();
-          if (currentFile && currentFile.path !== lastFilePath) {
-            lastSelection = '';
-            lastFilePath = currentFile.path;
-            lastCursorPosition = -1;
-
-            setTimeout(() => {
-              if (!this.mainContainerEl.isShown()) return;
-
-              const fileName = currentFile.name;
-
-              if (activeView.editor.somethingSelected()) {
-                const selection = activeView.editor.getSelection();
-                if (selection && selection.length > TEXT_LIMITS.minSelectionLength) {
-                  const cursor = activeView.editor.getCursor('from');
-                  const lineNumber = cursor.line + 1;
-                  this.loadText(selection, { fileName, lineNumber });
-                  return;
-                }
-              }
-
-              const fullContent = activeView.editor.getValue();
-              if (fullContent && fullContent.trim().length > TEXT_LIMITS.minContentLength) {
-                const cursor = activeView.editor.getCursor();
-                const cursorPosition = activeView.editor.posToOffset(cursor);
-                this.loadText(fullContent, { fileName, cursorPosition });
-              }
-            }, TIMING.autoLoadDelayShort);
-          }
+        const currentFile = this.app.workspace.getActiveFile();
+        if (currentFile && this.autoLoadManager.hasFileChanged(currentFile.path)) {
+          this.autoLoadManager.resetForNewFile(currentFile.path);
+          this.autoLoadManager.loadFromEditor(TIMING.autoLoadDelayShort);
         }
       })
     );
 
-    // Mouse and keyboard events for cursor tracking
+    // Mouse events for cursor tracking
     this.registerDomEvent(document, 'mouseup', () => {
       console.log('DashReader: Mouse click detected');
       setTimeout(() => {
         if (this.mainContainerEl.isShown()) {
-          checkSelectionOrCursor();
+          this.autoLoadManager.checkSelectionOrCursor();
         }
       }, TIMING.autoLoadDelayVeryShort);
     });
 
+    // Keyboard events for navigation and selection
     this.registerDomEvent(document, 'keyup', (evt: KeyboardEvent) => {
-      const isNavigationKey =
-        evt.key === 'ArrowUp' || evt.key === 'ArrowDown' ||
-        evt.key === 'ArrowLeft' || evt.key === 'ArrowRight' ||
-        evt.key === 'Home' || evt.key === 'End' ||
-        evt.key === 'PageUp' || evt.key === 'PageDown' ||
-        evt.key === 'Enter' ||
-        (evt.key === 'j' && evt.ctrlKey) || (evt.key === 'k' && evt.ctrlKey) ||
-        (evt.key === 'd' && evt.ctrlKey) || (evt.key === 'u' && evt.ctrlKey) ||
-        ((evt.key === 'ArrowUp' || evt.key === 'ArrowDown') && (evt.metaKey || evt.ctrlKey));
-
-      const isSelectionKey = evt.shiftKey || (evt.key === 'a' && (evt.metaKey || evt.ctrlKey));
-
-      if (isNavigationKey || isSelectionKey) {
+      if (isNavigationKey(evt) || isSelectionKey(evt)) {
         console.log('DashReader: Navigation key detected:', evt.key, 'with modifiers:', {
           shift: evt.shiftKey,
           ctrl: evt.ctrlKey,
@@ -580,7 +474,7 @@ export class DashReaderView extends ItemView {
         });
         setTimeout(() => {
           if (this.mainContainerEl.isShown()) {
-            checkSelectionOrCursor();
+            this.autoLoadManager.checkSelectionOrCursor();
           }
         }, TIMING.autoLoadDelayVeryShort);
       }

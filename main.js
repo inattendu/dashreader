@@ -27,10 +27,10 @@ __export(main_exports, {
   default: () => DashReaderPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian3 = require("obsidian");
+var import_obsidian4 = require("obsidian");
 
 // src/rsvp-view.ts
-var import_obsidian = require("obsidian");
+var import_obsidian2 = require("obsidian");
 
 // src/rsvp-engine.ts
 var RSVPEngine = class {
@@ -752,9 +752,181 @@ function createReadyMessage(wordsToRead, totalWords, startIndex, durationText, s
   `;
 }
 
+// src/auto-load-manager.ts
+var import_obsidian = require("obsidian");
+function isNavigationKey(evt) {
+  return (
+    // Arrow keys
+    evt.key === "ArrowUp" || evt.key === "ArrowDown" || evt.key === "ArrowLeft" || evt.key === "ArrowRight" || // Home/End/PageUp/PageDown
+    evt.key === "Home" || evt.key === "End" || evt.key === "PageUp" || evt.key === "PageDown" || // Enter
+    evt.key === "Enter" || // Vim-style navigation
+    evt.key === "j" && evt.ctrlKey || evt.key === "k" && evt.ctrlKey || evt.key === "d" && evt.ctrlKey || evt.key === "u" && evt.ctrlKey || // Cmd/Ctrl + arrows
+    (evt.key === "ArrowUp" || evt.key === "ArrowDown") && (evt.metaKey || evt.ctrlKey)
+  );
+}
+function isSelectionKey(evt) {
+  return evt.shiftKey || evt.key === "a" && (evt.metaKey || evt.ctrlKey);
+}
+function extractEditorContent(app) {
+  const activeView = app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
+  if (!activeView) {
+    return { activeView: null, currentFile: null };
+  }
+  const currentFile = app.workspace.getActiveFile();
+  if (!currentFile) {
+    return { activeView, currentFile: null };
+  }
+  const fileName = currentFile.name;
+  const editor = activeView.editor;
+  let selection;
+  let lineNumber;
+  if (editor.somethingSelected()) {
+    selection = editor.getSelection();
+    const cursor2 = editor.getCursor("from");
+    lineNumber = cursor2.line + 1;
+  }
+  const fullContent = editor.getValue();
+  const cursor = editor.getCursor();
+  const cursorPosition = editor.posToOffset(cursor);
+  return {
+    activeView,
+    currentFile,
+    fileName,
+    selection,
+    fullContent,
+    cursorPosition,
+    lineNumber
+  };
+}
+var AutoLoadManager = class {
+  constructor(app, loadTextCallback, isViewShown) {
+    this.app = app;
+    this.loadTextCallback = loadTextCallback;
+    this.isViewShown = isViewShown;
+    this.state = {
+      lastSelection: "",
+      lastFilePath: "",
+      lastCursorPosition: -1,
+      lastCheckTime: 0
+    };
+  }
+  /**
+   * Check for selection or cursor changes and load text if needed
+   * Includes throttling to avoid excessive checks
+   */
+  checkSelectionOrCursor() {
+    const now = Date.now();
+    if (now - this.state.lastCheckTime < TIMING.throttleDelay) {
+      return;
+    }
+    this.state.lastCheckTime = now;
+    const content = extractEditorContent(this.app);
+    if (!content.activeView || !content.currentFile) {
+      return;
+    }
+    if (content.selection && content.selection.length > TEXT_LIMITS.minSelectionLength) {
+      if (content.selection !== this.state.lastSelection) {
+        this.state.lastSelection = content.selection;
+        console.log(
+          "DashReader: Auto-loading selection",
+          content.selection.length,
+          "characters from",
+          content.fileName,
+          "line",
+          content.lineNumber
+        );
+        this.loadTextCallback(content.selection, {
+          fileName: content.fileName,
+          lineNumber: content.lineNumber
+        });
+      }
+      return;
+    }
+    if (content.fullContent && content.fullContent.trim().length > TEXT_LIMITS.minContentLength) {
+      if (content.cursorPosition !== this.state.lastCursorPosition) {
+        const positionDiff = Math.abs(content.cursorPosition - this.state.lastCursorPosition);
+        console.log(
+          "DashReader: Cursor moved from",
+          this.state.lastCursorPosition,
+          "to",
+          content.cursorPosition,
+          "(diff:",
+          positionDiff,
+          ")"
+        );
+        console.log(
+          "DashReader: Reloading from cursor position",
+          content.cursorPosition,
+          "in",
+          content.fileName
+        );
+        this.loadTextCallback(content.fullContent, {
+          fileName: content.fileName,
+          cursorPosition: content.cursorPosition
+        });
+        this.state.lastSelection = "";
+        this.state.lastCursorPosition = content.cursorPosition;
+      }
+    }
+  }
+  /**
+   * Load content from the active editor
+   * Used by file-open and leaf-change events
+   */
+  loadFromEditor(delay = TIMING.autoLoadDelay) {
+    setTimeout(() => {
+      if (!this.isViewShown())
+        return;
+      const content = extractEditorContent(this.app);
+      if (!content.activeView || !content.currentFile)
+        return;
+      if (content.selection && content.selection.length > TEXT_LIMITS.minSelectionLength) {
+        console.log(
+          "DashReader: Auto-loading selection",
+          content.selection.length,
+          "characters from line",
+          content.lineNumber
+        );
+        this.loadTextCallback(content.selection, {
+          fileName: content.fileName,
+          lineNumber: content.lineNumber
+        });
+        return;
+      }
+      if (content.fullContent && content.fullContent.trim().length > TEXT_LIMITS.minContentLength) {
+        console.log("DashReader: Auto-loading entire page from cursor position", content.cursorPosition);
+        this.loadTextCallback(content.fullContent, {
+          fileName: content.fileName,
+          cursorPosition: content.cursorPosition
+        });
+      }
+    }, delay);
+  }
+  /**
+   * Reset tracking state for a new file
+   */
+  resetForNewFile(filePath) {
+    this.state.lastSelection = "";
+    this.state.lastFilePath = filePath;
+    this.state.lastCursorPosition = -1;
+  }
+  /**
+   * Check if the file has changed
+   */
+  hasFileChanged(filePath) {
+    return filePath !== this.state.lastFilePath;
+  }
+  /**
+   * Get current state (for debugging)
+   */
+  getState() {
+    return { ...this.state };
+  }
+};
+
 // src/rsvp-view.ts
 var VIEW_TYPE_DASHREADER = "dashreader-view";
-var DashReaderView = class extends import_obsidian.ItemView {
+var DashReaderView = class extends import_obsidian2.ItemView {
   constructor(leaf, settings) {
     super(leaf);
     this.settings = settings;
@@ -768,6 +940,14 @@ var DashReaderView = class extends import_obsidian.ItemView {
       settings,
       this.onWordChange.bind(this),
       this.onComplete.bind(this)
+    );
+    this.autoLoadManager = new AutoLoadManager(
+      this.app,
+      this.loadText.bind(this),
+      () => {
+        var _a, _b;
+        return (_b = (_a = this.mainContainerEl) == null ? void 0 : _a.isShown()) != null ? _b : false;
+      }
     );
   }
   getViewType() {
@@ -1063,116 +1243,29 @@ var DashReaderView = class extends import_obsidian.ItemView {
       this.contextAfterEl.style.display = display;
     }
   }
+  /**
+   * Setup automatic text loading from editor
+   * Extracted into AutoLoadManager for better maintainability
+   */
   setupAutoLoad() {
-    let lastSelection = "";
-    let lastFilePath = "";
-    let lastCursorPosition = -1;
-    let lastCheckTime = 0;
-    const checkSelectionOrCursor = () => {
-      const now = Date.now();
-      if (now - lastCheckTime < TIMING.throttleDelay)
-        return;
-      lastCheckTime = now;
-      const activeView = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
-      if (!activeView)
-        return;
-      const currentFile = this.app.workspace.getActiveFile();
-      if (!currentFile)
-        return;
-      const fileName = currentFile.name;
-      if (activeView.editor.somethingSelected()) {
-        const selection = activeView.editor.getSelection();
-        if (selection && selection.length > TEXT_LIMITS.minSelectionLength && selection !== lastSelection) {
-          lastSelection = selection;
-          const cursor = activeView.editor.getCursor("from");
-          const lineNumber = cursor.line + 1;
-          console.log("DashReader: Auto-loading selection", selection.length, "characters from", fileName, "line", lineNumber);
-          this.loadText(selection, { fileName, lineNumber });
-        }
-      } else {
-        const fullContent = activeView.editor.getValue();
-        if (fullContent && fullContent.trim().length > TEXT_LIMITS.minContentLength) {
-          const cursor = activeView.editor.getCursor();
-          const cursorPosition = activeView.editor.posToOffset(cursor);
-          if (cursorPosition !== lastCursorPosition) {
-            const positionDiff = Math.abs(cursorPosition - lastCursorPosition);
-            console.log("DashReader: Cursor moved from", lastCursorPosition, "to", cursorPosition, "(diff:", positionDiff, ")");
-            console.log("DashReader: Reloading from cursor position", cursorPosition, "in", fileName);
-            this.loadText(fullContent, { fileName, cursorPosition });
-            lastSelection = "";
-            lastCursorPosition = cursorPosition;
-          }
-        }
-      }
-    };
     this.registerEvent(
       this.app.workspace.on("file-open", (file) => {
         if (!file)
           return;
-        lastSelection = "";
-        lastFilePath = file.path;
-        lastCursorPosition = -1;
+        this.autoLoadManager.resetForNewFile(file.path);
         console.log("DashReader: File opened:", file.path);
-        setTimeout(() => {
-          if (!this.mainContainerEl.isShown())
-            return;
-          const activeView = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
-          if (activeView) {
-            const fileName = file.name;
-            if (activeView.editor.somethingSelected()) {
-              const selection = activeView.editor.getSelection();
-              if (selection && selection.length > TEXT_LIMITS.minSelectionLength) {
-                const cursor = activeView.editor.getCursor("from");
-                const lineNumber = cursor.line + 1;
-                console.log("DashReader: Auto-loading selection", selection.length, "characters from line", lineNumber);
-                this.loadText(selection, { fileName, lineNumber });
-                return;
-              }
-            }
-            const fullContent = activeView.editor.getValue();
-            if (fullContent && fullContent.trim().length > TEXT_LIMITS.minContentLength) {
-              const cursor = activeView.editor.getCursor();
-              const cursorPosition = activeView.editor.posToOffset(cursor);
-              console.log("DashReader: Auto-loading entire page from cursor position", cursorPosition);
-              this.loadText(fullContent, { fileName, cursorPosition });
-            }
-          }
-        }, TIMING.autoLoadDelay);
+        this.autoLoadManager.loadFromEditor(TIMING.autoLoadDelay);
       })
     );
     this.registerEvent(
-      this.app.workspace.on("active-leaf-change", (leaf) => {
+      this.app.workspace.on("active-leaf-change", () => {
         if (!this.mainContainerEl || !this.mainContainerEl.isShown())
           return;
         console.log("DashReader: Active leaf changed");
-        const activeView = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
-        if (activeView) {
-          const currentFile = this.app.workspace.getActiveFile();
-          if (currentFile && currentFile.path !== lastFilePath) {
-            lastSelection = "";
-            lastFilePath = currentFile.path;
-            lastCursorPosition = -1;
-            setTimeout(() => {
-              if (!this.mainContainerEl.isShown())
-                return;
-              const fileName = currentFile.name;
-              if (activeView.editor.somethingSelected()) {
-                const selection = activeView.editor.getSelection();
-                if (selection && selection.length > TEXT_LIMITS.minSelectionLength) {
-                  const cursor = activeView.editor.getCursor("from");
-                  const lineNumber = cursor.line + 1;
-                  this.loadText(selection, { fileName, lineNumber });
-                  return;
-                }
-              }
-              const fullContent = activeView.editor.getValue();
-              if (fullContent && fullContent.trim().length > TEXT_LIMITS.minContentLength) {
-                const cursor = activeView.editor.getCursor();
-                const cursorPosition = activeView.editor.posToOffset(cursor);
-                this.loadText(fullContent, { fileName, cursorPosition });
-              }
-            }, TIMING.autoLoadDelayShort);
-          }
+        const currentFile = this.app.workspace.getActiveFile();
+        if (currentFile && this.autoLoadManager.hasFileChanged(currentFile.path)) {
+          this.autoLoadManager.resetForNewFile(currentFile.path);
+          this.autoLoadManager.loadFromEditor(TIMING.autoLoadDelayShort);
         }
       })
     );
@@ -1180,14 +1273,12 @@ var DashReaderView = class extends import_obsidian.ItemView {
       console.log("DashReader: Mouse click detected");
       setTimeout(() => {
         if (this.mainContainerEl.isShown()) {
-          checkSelectionOrCursor();
+          this.autoLoadManager.checkSelectionOrCursor();
         }
       }, TIMING.autoLoadDelayVeryShort);
     });
     this.registerDomEvent(document, "keyup", (evt) => {
-      const isNavigationKey = evt.key === "ArrowUp" || evt.key === "ArrowDown" || evt.key === "ArrowLeft" || evt.key === "ArrowRight" || evt.key === "Home" || evt.key === "End" || evt.key === "PageUp" || evt.key === "PageDown" || evt.key === "Enter" || evt.key === "j" && evt.ctrlKey || evt.key === "k" && evt.ctrlKey || evt.key === "d" && evt.ctrlKey || evt.key === "u" && evt.ctrlKey || (evt.key === "ArrowUp" || evt.key === "ArrowDown") && (evt.metaKey || evt.ctrlKey);
-      const isSelectionKey = evt.shiftKey || evt.key === "a" && (evt.metaKey || evt.ctrlKey);
-      if (isNavigationKey || isSelectionKey) {
+      if (isNavigationKey(evt) || isSelectionKey(evt)) {
         console.log("DashReader: Navigation key detected:", evt.key, "with modifiers:", {
           shift: evt.shiftKey,
           ctrl: evt.ctrlKey,
@@ -1195,7 +1286,7 @@ var DashReaderView = class extends import_obsidian.ItemView {
         });
         setTimeout(() => {
           if (this.mainContainerEl.isShown()) {
-            checkSelectionOrCursor();
+            this.autoLoadManager.checkSelectionOrCursor();
           }
         }, TIMING.autoLoadDelayVeryShort);
       }
@@ -1404,8 +1495,8 @@ var DashReaderView = class extends import_obsidian.ItemView {
 };
 
 // src/settings.ts
-var import_obsidian2 = require("obsidian");
-var DashReaderSettingTab = class extends import_obsidian2.PluginSettingTab {
+var import_obsidian3 = require("obsidian");
+var DashReaderSettingTab = class extends import_obsidian3.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
@@ -1415,89 +1506,89 @@ var DashReaderSettingTab = class extends import_obsidian2.PluginSettingTab {
     containerEl.empty();
     containerEl.createEl("h2", { text: "DashReader Settings" });
     containerEl.createEl("h3", { text: "Reading Settings" });
-    new import_obsidian2.Setting(containerEl).setName("Words per minute (WPM)").setDesc("Reading speed (50-1000)").addSlider((slider) => slider.setLimits(50, 1e3, 25).setValue(this.plugin.settings.wpm).setDynamicTooltip().onChange(async (value) => {
+    new import_obsidian3.Setting(containerEl).setName("Words per minute (WPM)").setDesc("Reading speed (50-1000)").addSlider((slider) => slider.setLimits(50, 1e3, 25).setValue(this.plugin.settings.wpm).setDynamicTooltip().onChange(async (value) => {
       this.plugin.settings.wpm = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian2.Setting(containerEl).setName("Words at a time").setDesc("Number of words displayed simultaneously (1-5)").addSlider((slider) => slider.setLimits(1, 5, 1).setValue(this.plugin.settings.chunkSize).setDynamicTooltip().onChange(async (value) => {
+    new import_obsidian3.Setting(containerEl).setName("Words at a time").setDesc("Number of words displayed simultaneously (1-5)").addSlider((slider) => slider.setLimits(1, 5, 1).setValue(this.plugin.settings.chunkSize).setDynamicTooltip().onChange(async (value) => {
       this.plugin.settings.chunkSize = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian2.Setting(containerEl).setName("Font size").setDesc("Font size in pixels (20-120px)").addSlider((slider) => slider.setLimits(20, 120, 4).setValue(this.plugin.settings.fontSize).setDynamicTooltip().onChange(async (value) => {
+    new import_obsidian3.Setting(containerEl).setName("Font size").setDesc("Font size in pixels (20-120px)").addSlider((slider) => slider.setLimits(20, 120, 4).setValue(this.plugin.settings.fontSize).setDynamicTooltip().onChange(async (value) => {
       this.plugin.settings.fontSize = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian2.Setting(containerEl).setName("Font family").setDesc("Font family for text display").addDropdown((dropdown) => dropdown.addOption("inherit", "Default").addOption("monospace", "Monospace").addOption("serif", "Serif").addOption("sans-serif", "Sans-serif").setValue(this.plugin.settings.fontFamily).onChange(async (value) => {
+    new import_obsidian3.Setting(containerEl).setName("Font family").setDesc("Font family for text display").addDropdown((dropdown) => dropdown.addOption("inherit", "Default").addOption("monospace", "Monospace").addOption("serif", "Serif").addOption("sans-serif", "Sans-serif").setValue(this.plugin.settings.fontFamily).onChange(async (value) => {
       this.plugin.settings.fontFamily = value;
       await this.plugin.saveSettings();
     }));
     containerEl.createEl("h3", { text: "Speed Acceleration" });
-    new import_obsidian2.Setting(containerEl).setName("Enable acceleration").setDesc("Gradually increase reading speed over time").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableAcceleration).onChange(async (value) => {
+    new import_obsidian3.Setting(containerEl).setName("Enable acceleration").setDesc("Gradually increase reading speed over time").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableAcceleration).onChange(async (value) => {
       this.plugin.settings.enableAcceleration = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian2.Setting(containerEl).setName("Acceleration duration").setDesc("Duration to reach target speed (seconds)").addSlider((slider) => slider.setLimits(10, 120, 5).setValue(this.plugin.settings.accelerationDuration).setDynamicTooltip().onChange(async (value) => {
+    new import_obsidian3.Setting(containerEl).setName("Acceleration duration").setDesc("Duration to reach target speed (seconds)").addSlider((slider) => slider.setLimits(10, 120, 5).setValue(this.plugin.settings.accelerationDuration).setDynamicTooltip().onChange(async (value) => {
       this.plugin.settings.accelerationDuration = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian2.Setting(containerEl).setName("Target WPM").setDesc("Target reading speed to reach (50-1000)").addSlider((slider) => slider.setLimits(50, 1e3, 25).setValue(this.plugin.settings.accelerationTargetWpm).setDynamicTooltip().onChange(async (value) => {
+    new import_obsidian3.Setting(containerEl).setName("Target WPM").setDesc("Target reading speed to reach (50-1000)").addSlider((slider) => slider.setLimits(50, 1e3, 25).setValue(this.plugin.settings.accelerationTargetWpm).setDynamicTooltip().onChange(async (value) => {
       this.plugin.settings.accelerationTargetWpm = value;
       await this.plugin.saveSettings();
     }));
     containerEl.createEl("h3", { text: "Appearance" });
-    new import_obsidian2.Setting(containerEl).setName("Highlight color").setDesc("Color for the center character highlight").addText((text) => text.setPlaceholder("#4a9eff").setValue(this.plugin.settings.highlightColor).onChange(async (value) => {
+    new import_obsidian3.Setting(containerEl).setName("Highlight color").setDesc("Color for the center character highlight").addText((text) => text.setPlaceholder("#4a9eff").setValue(this.plugin.settings.highlightColor).onChange(async (value) => {
       this.plugin.settings.highlightColor = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian2.Setting(containerEl).setName("Font color").setDesc("Text color").addText((text) => text.setPlaceholder("#ffffff").setValue(this.plugin.settings.fontColor).onChange(async (value) => {
+    new import_obsidian3.Setting(containerEl).setName("Font color").setDesc("Text color").addText((text) => text.setPlaceholder("#ffffff").setValue(this.plugin.settings.fontColor).onChange(async (value) => {
       this.plugin.settings.fontColor = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian2.Setting(containerEl).setName("Background color").setDesc("Background color").addText((text) => text.setPlaceholder("#1e1e1e").setValue(this.plugin.settings.backgroundColor).onChange(async (value) => {
+    new import_obsidian3.Setting(containerEl).setName("Background color").setDesc("Background color").addText((text) => text.setPlaceholder("#1e1e1e").setValue(this.plugin.settings.backgroundColor).onChange(async (value) => {
       this.plugin.settings.backgroundColor = value;
       await this.plugin.saveSettings();
     }));
     containerEl.createEl("h3", { text: "Context Display" });
-    new import_obsidian2.Setting(containerEl).setName("Show context").setDesc("Display words before and after current word").addToggle((toggle) => toggle.setValue(this.plugin.settings.showContext).onChange(async (value) => {
+    new import_obsidian3.Setting(containerEl).setName("Show context").setDesc("Display words before and after current word").addToggle((toggle) => toggle.setValue(this.plugin.settings.showContext).onChange(async (value) => {
       this.plugin.settings.showContext = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian2.Setting(containerEl).setName("Context words").setDesc("Number of context words to display (1-10)").addSlider((slider) => slider.setLimits(1, 10, 1).setValue(this.plugin.settings.contextWords).setDynamicTooltip().onChange(async (value) => {
+    new import_obsidian3.Setting(containerEl).setName("Context words").setDesc("Number of context words to display (1-10)").addSlider((slider) => slider.setLimits(1, 10, 1).setValue(this.plugin.settings.contextWords).setDynamicTooltip().onChange(async (value) => {
       this.plugin.settings.contextWords = value;
       await this.plugin.saveSettings();
     }));
     containerEl.createEl("h3", { text: "Micropause" });
-    new import_obsidian2.Setting(containerEl).setName("Enable micropause").setDesc("Automatic pauses based on punctuation and word length").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableMicropause).onChange(async (value) => {
+    new import_obsidian3.Setting(containerEl).setName("Enable micropause").setDesc("Automatic pauses based on punctuation and word length").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableMicropause).onChange(async (value) => {
       this.plugin.settings.enableMicropause = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian2.Setting(containerEl).setName("Punctuation pause").setDesc("Pause multiplier for punctuation (1.0-3.0)").addSlider((slider) => slider.setLimits(1, 3, 0.1).setValue(this.plugin.settings.micropausePunctuation).setDynamicTooltip().onChange(async (value) => {
+    new import_obsidian3.Setting(containerEl).setName("Punctuation pause").setDesc("Pause multiplier for punctuation (1.0-3.0)").addSlider((slider) => slider.setLimits(1, 3, 0.1).setValue(this.plugin.settings.micropausePunctuation).setDynamicTooltip().onChange(async (value) => {
       this.plugin.settings.micropausePunctuation = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian2.Setting(containerEl).setName("Long words pause").setDesc("Pause multiplier for long words (1.0-2.0)").addSlider((slider) => slider.setLimits(1, 2, 0.1).setValue(this.plugin.settings.micropauseLongWords).setDynamicTooltip().onChange(async (value) => {
+    new import_obsidian3.Setting(containerEl).setName("Long words pause").setDesc("Pause multiplier for long words (1.0-2.0)").addSlider((slider) => slider.setLimits(1, 2, 0.1).setValue(this.plugin.settings.micropauseLongWords).setDynamicTooltip().onChange(async (value) => {
       this.plugin.settings.micropauseLongWords = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian2.Setting(containerEl).setName("Paragraph pause").setDesc("Pause multiplier for paragraph breaks (1.0-5.0)").addSlider((slider) => slider.setLimits(1, 5, 0.5).setValue(this.plugin.settings.micropauseParagraph).setDynamicTooltip().onChange(async (value) => {
+    new import_obsidian3.Setting(containerEl).setName("Paragraph pause").setDesc("Pause multiplier for paragraph breaks (1.0-5.0)").addSlider((slider) => slider.setLimits(1, 5, 0.5).setValue(this.plugin.settings.micropauseParagraph).setDynamicTooltip().onChange(async (value) => {
       this.plugin.settings.micropauseParagraph = value;
       await this.plugin.saveSettings();
     }));
     containerEl.createEl("h3", { text: "Auto-start" });
-    new import_obsidian2.Setting(containerEl).setName("Auto-start reading").setDesc("Automatically start reading after text loads").addToggle((toggle) => toggle.setValue(this.plugin.settings.autoStart).onChange(async (value) => {
+    new import_obsidian3.Setting(containerEl).setName("Auto-start reading").setDesc("Automatically start reading after text loads").addToggle((toggle) => toggle.setValue(this.plugin.settings.autoStart).onChange(async (value) => {
       this.plugin.settings.autoStart = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian2.Setting(containerEl).setName("Auto-start delay").setDesc("Delay before auto-start (seconds)").addSlider((slider) => slider.setLimits(1, 10, 1).setValue(this.plugin.settings.autoStartDelay).setDynamicTooltip().onChange(async (value) => {
+    new import_obsidian3.Setting(containerEl).setName("Auto-start delay").setDesc("Delay before auto-start (seconds)").addSlider((slider) => slider.setLimits(1, 10, 1).setValue(this.plugin.settings.autoStartDelay).setDynamicTooltip().onChange(async (value) => {
       this.plugin.settings.autoStartDelay = value;
       await this.plugin.saveSettings();
     }));
     containerEl.createEl("h3", { text: "Display Options" });
-    new import_obsidian2.Setting(containerEl).setName("Show progress bar").setDesc("Display reading progress bar").addToggle((toggle) => toggle.setValue(this.plugin.settings.showProgress).onChange(async (value) => {
+    new import_obsidian3.Setting(containerEl).setName("Show progress bar").setDesc("Display reading progress bar").addToggle((toggle) => toggle.setValue(this.plugin.settings.showProgress).onChange(async (value) => {
       this.plugin.settings.showProgress = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian2.Setting(containerEl).setName("Show statistics").setDesc("Display reading statistics").addToggle((toggle) => toggle.setValue(this.plugin.settings.showStats).onChange(async (value) => {
+    new import_obsidian3.Setting(containerEl).setName("Show statistics").setDesc("Display reading statistics").addToggle((toggle) => toggle.setValue(this.plugin.settings.showStats).onChange(async (value) => {
       this.plugin.settings.showStats = value;
       await this.plugin.saveSettings();
     }));
@@ -1540,7 +1631,7 @@ var DEFAULT_SETTINGS = {
 };
 
 // main.ts
-var DashReaderPlugin = class extends import_obsidian3.Plugin {
+var DashReaderPlugin = class extends import_obsidian4.Plugin {
   constructor() {
     super(...arguments);
     this.view = null;
@@ -1577,7 +1668,7 @@ var DashReaderPlugin = class extends import_obsidian3.Plugin {
             }
           });
         } else {
-          new import_obsidian3.Notice("Please select some text first");
+          new import_obsidian4.Notice("Please select some text first");
         }
       }
     });
@@ -1585,7 +1676,7 @@ var DashReaderPlugin = class extends import_obsidian3.Plugin {
       id: "read-note",
       name: "Read entire note",
       callback: () => {
-        const activeView = this.app.workspace.getActiveViewOfType(import_obsidian3.MarkdownView);
+        const activeView = this.app.workspace.getActiveViewOfType(import_obsidian4.MarkdownView);
         if (activeView) {
           const content = activeView.editor.getValue();
           this.activateView().then(() => {
@@ -1594,7 +1685,7 @@ var DashReaderPlugin = class extends import_obsidian3.Plugin {
             }
           });
         } else {
-          new import_obsidian3.Notice("No active note found");
+          new import_obsidian4.Notice("No active note found");
         }
       }
     });
@@ -1602,7 +1693,7 @@ var DashReaderPlugin = class extends import_obsidian3.Plugin {
       id: "toggle-play-pause",
       name: "Toggle Play/Pause",
       callback: () => {
-        new import_obsidian3.Notice("Use Shift+Space key when DashReader is active");
+        new import_obsidian4.Notice("Use Shift+Space key when DashReader is active");
       }
     });
     this.registerEvent(

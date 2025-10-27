@@ -265,3 +265,196 @@ export function createReadyMessage(
     </div>
   `;
 }
+
+/**
+ * Slider configuration
+ */
+export interface SliderConfig {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  onChange: (value: number) => void;
+  registryKey?: string;
+  showValue?: boolean;
+  unit?: string;
+}
+
+/**
+ * Create a range slider control with optional value display
+ * Useful for smooth value adjustments (WPM, font size, etc.)
+ */
+export function createSlider(
+  parent: HTMLElement,
+  config: SliderConfig,
+  registry?: DOMRegistry
+): { container: HTMLElement; slider: HTMLInputElement; valueEl?: HTMLElement } {
+  const container = parent.createDiv({ cls: CSS_CLASSES.settingGroup });
+
+  // Label
+  container.createEl('span', {
+    text: config.label,
+    cls: CSS_CLASSES.settingLabel
+  });
+
+  // Slider
+  const slider = container.createEl('input', {
+    type: 'range',
+    attr: {
+      min: String(config.min),
+      max: String(config.max),
+      step: String(config.step || 1),
+      value: String(config.value)
+    }
+  });
+  slider.classList.add('dashreader-slider');
+
+  // Value display (optional)
+  let valueEl: HTMLElement | undefined;
+  if (config.showValue !== false) {
+    const unit = config.unit || '';
+    valueEl = container.createEl('span', {
+      text: `${config.value}${unit}`,
+      cls: config.registryKey || 'slider-value'
+    });
+
+    if (config.registryKey && registry) {
+      registry.register(config.registryKey as any, valueEl);
+    }
+  }
+
+  // Event handler
+  slider.addEventListener('input', () => {
+    const newValue = parseInt(slider.value);
+    config.onChange(newValue);
+    if (valueEl) {
+      const unit = config.unit || '';
+      valueEl.setText(`${newValue}${unit}`);
+    }
+  });
+
+  return { container, slider, valueEl };
+}
+
+/**
+ * Dropdown option
+ */
+export interface DropdownOption {
+  value: string;
+  label: string;
+}
+
+/**
+ * Dropdown configuration
+ */
+export interface DropdownConfig {
+  label: string;
+  options: DropdownOption[];
+  value: string;
+  onChange: (value: string) => void;
+}
+
+/**
+ * Create a dropdown/select control
+ * Useful for preset selection (reading modes, themes, etc.)
+ */
+export function createDropdown(
+  parent: HTMLElement,
+  config: DropdownConfig
+): { container: HTMLElement; select: HTMLSelectElement } {
+  const container = parent.createDiv({ cls: CSS_CLASSES.settingGroup });
+
+  // Label
+  container.createEl('span', {
+    text: config.label,
+    cls: CSS_CLASSES.settingLabel
+  });
+
+  // Select element
+  const select = container.createEl('select', {
+    cls: 'dashreader-dropdown'
+  });
+
+  // Add options
+  config.options.forEach(option => {
+    const optionEl = select.createEl('option', {
+      value: option.value,
+      text: option.label
+    });
+    if (option.value === config.value) {
+      optionEl.selected = true;
+    }
+  });
+
+  // Event handler
+  select.addEventListener('change', () => {
+    config.onChange(select.value);
+  });
+
+  return { container, select };
+}
+
+/**
+ * Button group option
+ */
+export interface ButtonGroupOption {
+  value: string;
+  label: string;
+  icon?: string;
+}
+
+/**
+ * Button group configuration
+ */
+export interface ButtonGroupConfig {
+  label: string;
+  options: ButtonGroupOption[];
+  value: string;
+  onChange: (value: string) => void;
+}
+
+/**
+ * Create a button group (radio buttons styled as buttons)
+ * Useful for mode selection (chunk size presets, reading speeds, etc.)
+ */
+export function createButtonGroup(
+  parent: HTMLElement,
+  config: ButtonGroupConfig
+): { container: HTMLElement; buttons: HTMLButtonElement[] } {
+  const container = parent.createDiv({ cls: CSS_CLASSES.settingGroup });
+
+  // Label
+  container.createEl('span', {
+    text: config.label,
+    cls: CSS_CLASSES.settingLabel
+  });
+
+  // Button group container
+  const groupContainer = container.createDiv({ cls: 'dashreader-button-group' });
+
+  // Create buttons
+  const buttons = config.options.map(option => {
+    const btn = groupContainer.createEl('button', {
+      text: option.icon ? `${option.icon} ${option.label}` : option.label,
+      cls: 'dashreader-group-btn'
+    });
+
+    if (option.value === config.value) {
+      btn.classList.add('active');
+    }
+
+    btn.addEventListener('click', () => {
+      // Remove active from all buttons
+      buttons.forEach(b => b.classList.remove('active'));
+      // Add active to clicked button
+      btn.classList.add('active');
+      // Trigger onChange
+      config.onChange(option.value);
+    });
+
+    return btn;
+  });
+
+  return { container, buttons };
+}
