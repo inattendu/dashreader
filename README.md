@@ -40,12 +40,17 @@ Instead of your eyes moving across lines of text, the text comes to you. Each wo
 - **Proportional heading display** - H1 displayed 1.5x larger, H2 at 1.3x, H3 at 1.2x, etc.
 - Visual separators before sections
 
-### Contextual Navigation
+### Contextual Navigation (v1.4.0)
 
 - **Breadcrumb navigation** - shows your position in document structure (H1 › H2 › H3)
+  - Section counter: displays "Section 2/5" for H1 headings
+  - Click any heading to jump to that position
+  - Dropdown menus (▼) for navigating between headings of same level
+  - Full heading titles displayed (no truncation, word-wrapping enabled)
 - Updates automatically as you read through sections
-- Click any heading/callout in breadcrumb to jump to that section
+- Displayed immediately on text load, not just during playback
 - Callouts displayed with their respective icons in breadcrumb
+- **New tab mode** - click ⤢ button to open in dedicated tab for fullscreen-like experience
 
 ### Smart Positioning
 - **Click-to-start** - automatically begins reading from cursor position
@@ -99,10 +104,19 @@ Instead of your eyes moving across lines of text, the text comes to you. Each wo
 All settings available in `Settings → DashReader`:
 
 - **Reading Settings**: WPM speed, chunk size, font size and family
+- **Slow Start** (v1.4.0): Enable progressive speed ramp over first 5 words for comfortable start
 - **Speed Acceleration**: Enable progressive acceleration, duration, target WPM
 - **Appearance**: Highlight color, text color, background color
 - **Context Display**: Show/hide context words, number of context words
-- **Micropause**: Enable/disable, punctuation multiplier, long words, paragraphs
+- **Micropause** (v1.4.0): Enable/disable, configurable multipliers for:
+  - Sentence punctuation (.,!?) - default 2.5x
+  - Other punctuation (;:,) - default 1.5x
+  - Numbers and dates - default 1.8x
+  - Long words (>8 chars) - default 1.4x
+  - Paragraphs - default 2.5x
+  - Section markers (1., I., etc.) - default 2.0x
+  - List bullets (-, *, +) - default 1.8x
+  - Obsidian callouts - default 2.0x
 - **Auto-start**: Enable auto-start, delay duration
 - **Display Options**: Progress bar, statistics visibility
 
