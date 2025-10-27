@@ -673,6 +673,15 @@ export class DashReaderView extends ItemView {
     `;
   }
 
+  private escapeHtml(text: string): string {
+    // Escape HTML characters to prevent XSS attacks
+    return text.replace(/&/g, '&amp;')
+               .replace(/</g, '&lt;')
+               .replace(/>/g, '&gt;')
+               .replace(/"/g, '&quot;')
+               .replace(/'/g, '&#039;');
+  }
+
   private processWord(word: string): string {
     // Trouver le centre du mot pour le highlighter
     const cleanWord = word.trim();
@@ -680,10 +689,13 @@ export class DashReaderView extends ItemView {
 
     let result = '';
     for (let i = 0; i < cleanWord.length; i++) {
+      // Escape each character to prevent XSS from user notes
+      const escapedChar = this.escapeHtml(cleanWord[i]);
+
       if (i === center) {
-        result += `<span class="dashreader-highlight" style="color: ${this.settings.highlightColor}">${cleanWord[i]}</span>`;
+        result += `<span class="dashreader-highlight" style="color: ${this.settings.highlightColor}">${escapedChar}</span>`;
       } else {
-        result += cleanWord[i];
+        result += escapedChar;
       }
     }
 
@@ -777,8 +789,11 @@ export class DashReaderView extends ItemView {
     // Préparer le message avec le nom du document et ligne
     let sourceInfo = '';
     if (source?.fileName) {
+      // Escape filename to prevent XSS if user has malicious filename
+      const escapedFileName = this.escapeHtml(source.fileName);
+      const lineInfo = source.lineNumber ? ` (line ${source.lineNumber})` : '';
       sourceInfo = `<div style="font-size: 14px; opacity: 0.6; margin-bottom: 8px;">
-        📄 ${source.fileName}${source.lineNumber ? ` (line ${source.lineNumber})` : ''}
+        📄 ${escapedFileName}${lineInfo}
       </div>`;
     }
 

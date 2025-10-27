@@ -847,15 +847,19 @@ var DashReaderView = class extends import_obsidian.ItemView {
       </div>
     `;
   }
+  escapeHtml(text) {
+    return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+  }
   processWord(word) {
     const cleanWord = word.trim();
     const center = Math.max(Math.floor(cleanWord.length / 2) - 1, 0);
     let result = "";
     for (let i = 0; i < cleanWord.length; i++) {
+      const escapedChar = this.escapeHtml(cleanWord[i]);
       if (i === center) {
-        result += `<span class="dashreader-highlight" style="color: ${this.settings.highlightColor}">${cleanWord[i]}</span>`;
+        result += `<span class="dashreader-highlight" style="color: ${this.settings.highlightColor}">${escapedChar}</span>`;
       } else {
-        result += cleanWord[i];
+        result += escapedChar;
       }
     }
     return result;
@@ -925,8 +929,10 @@ var DashReaderView = class extends import_obsidian.ItemView {
     this.wordEl.innerHTML = "";
     let sourceInfo = "";
     if (source == null ? void 0 : source.fileName) {
+      const escapedFileName = this.escapeHtml(source.fileName);
+      const lineInfo = source.lineNumber ? ` (line ${source.lineNumber})` : "";
       sourceInfo = `<div style="font-size: 14px; opacity: 0.6; margin-bottom: 8px;">
-        \u{1F4C4} ${source.fileName}${source.lineNumber ? ` (line ${source.lineNumber})` : ""}
+        \u{1F4C4} ${escapedFileName}${lineInfo}
       </div>`;
     }
     const totalWords = this.engine.getTotalWords();
@@ -1205,7 +1211,6 @@ var DashReaderPlugin = class extends import_obsidian3.Plugin {
   }
   onunload() {
     console.log("Unloading DashReader plugin");
-    this.app.workspace.detachLeavesOfType(VIEW_TYPE_DASHREADER);
   }
   async loadSettings() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());

@@ -120,7 +120,7 @@ export default class DashReaderPlugin extends Plugin {
 
   onunload() {
     console.log('Unloading DashReader plugin');
-    this.app.workspace.detachLeavesOfType(VIEW_TYPE_DASHREADER);
+    // Don't detach leaves here - let Obsidian restore them at original positions during updates
   }
 
   async loadSettings() {
