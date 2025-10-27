@@ -1801,45 +1801,13 @@ var DashReaderView = class extends import_obsidian2.ItemView {
       this.dom
     );
     createToggleControl(this.settingsEl, {
-      label: "Speed Acceleration",
-      checked: this.settings.enableAcceleration,
+      label: "Slow Start",
+      checked: this.settings.enableSlowStart,
       onChange: (checked) => {
-        this.settings.enableAcceleration = checked;
+        this.settings.enableSlowStart = checked;
         this.engine.updateSettings(this.settings);
-        this.accelDurationGroup.style.display = checked ? "flex" : "none";
-        this.accelTargetGroup.style.display = checked ? "flex" : "none";
       }
     });
-    const accelDurationControl = createNumberControl(
-      this.settingsEl,
-      {
-        label: "Accel Duration (s): ",
-        value: this.settings.accelerationDuration,
-        onIncrement: () => this.changeValue("accelDuration", INCREMENTS.accelDuration),
-        onDecrement: () => this.changeValue("accelDuration", -INCREMENTS.accelDuration),
-        registryKey: "accelDurationValue",
-        decrementTitle: "Shorter (-5s)",
-        incrementTitle: "Longer (+5s)"
-      },
-      this.dom
-    );
-    this.accelDurationGroup = accelDurationControl.container;
-    this.accelDurationGroup.style.display = this.settings.enableAcceleration ? "flex" : "none";
-    const accelTargetControl = createNumberControl(
-      this.settingsEl,
-      {
-        label: "Target WPM: ",
-        value: this.settings.accelerationTargetWpm,
-        onIncrement: () => this.changeValue("accelTarget", INCREMENTS.wpm),
-        onDecrement: () => this.changeValue("accelTarget", -INCREMENTS.wpm),
-        registryKey: "accelTargetValue",
-        decrementTitle: "Lower (-25)",
-        incrementTitle: "Higher (+25)"
-      },
-      this.dom
-    );
-    this.accelTargetGroup = accelTargetControl.container;
-    this.accelTargetGroup.style.display = this.settings.enableAcceleration ? "flex" : "none";
     createNumberControl(
       this.settingsEl,
       {
@@ -1911,26 +1879,6 @@ var DashReaderView = class extends import_obsidian2.ItemView {
         this.state.set("currentFontSize", newSize);
         this.wordEl.style.fontSize = `${newSize}px`;
         this.dom.updateText("fontValue", newSize);
-        break;
-      }
-      case "accelDuration": {
-        const newDuration = Math.max(
-          LIMITS.accelDuration.min,
-          Math.min(LIMITS.accelDuration.max, this.settings.accelerationDuration + delta)
-        );
-        this.settings.accelerationDuration = newDuration;
-        this.engine.updateSettings(this.settings);
-        this.dom.updateText("accelDurationValue", newDuration);
-        break;
-      }
-      case "accelTarget": {
-        const newTarget = Math.max(
-          LIMITS.wpm.min,
-          Math.min(LIMITS.wpm.max, this.settings.accelerationTargetWpm + delta)
-        );
-        this.settings.accelerationTargetWpm = newTarget;
-        this.engine.updateSettings(this.settings);
-        this.dom.updateText("accelTargetValue", newTarget);
         break;
       }
     }
