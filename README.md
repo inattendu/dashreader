@@ -93,14 +93,6 @@ All settings available in `Settings → DashReader`:
 
 Built with TypeScript and the plugin API for maximum performance and integration.
 
-## Roadmap
-
-- [ ] Export reading statistics
-- [ ] Bookmarks for long texts
-- [ ] Reading profiles (by content type)
-- [ ] Full-screen focus mode
-- [ ] Sync progress across devices
-
 ## Contributing
 
 Contributions are welcome!
