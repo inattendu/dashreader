@@ -35,8 +35,6 @@
  * │  └─ togglePlay()
  * ├─ 7. READING ENGINE CALLBACKS
  * │  ├─ onWordChange()
- * │  ├─ displayWordWithHeading()
- * │  ├─ processWord()
  * │  ├─ onComplete()
  * │  └─ updateStats()
  * ├─ 8. TEXT LOADING
@@ -53,26 +51,23 @@
 // SECTION 1: IMPORTS & CONSTANTS
 // ============================================================================
 
-import { ItemView, WorkspaceLeaf, MarkdownView } from 'obsidian';
+import { ItemView, WorkspaceLeaf } from 'obsidian';
 import { RSVPEngine } from './rsvp-engine';
 import { DashReaderSettings, WordChunk, HeadingContext, HeadingInfo } from './types';
 import { MarkdownParser } from './markdown-parser';
 import { ViewState } from './view-state';
 import { DOMRegistry } from './dom-registry';
-import { MenuBuilder } from './menu-builder';
 import { BreadcrumbManager } from './breadcrumb-manager';
 import { WordDisplay } from './word-display';
 import { HotkeyHandler } from './hotkey-handler';
+import { MinimapManager } from './minimap-manager';
 import {
   createButton,
   createNumberControl,
   createToggleControl,
   createPlayPauseButtons,
   updatePlayPauseButtons,
-  createWelcomeMessage,
-  createReadyMessage,
   formatTime,
-  escapeHtml,
 } from './ui-builders';
 import {
   CSS_CLASSES,
@@ -81,7 +76,6 @@ import {
   TEXT_LIMITS,
   INCREMENTS,
   LIMITS,
-  HEADING_MULTIPLIERS,
 } from './constants';
 import { AutoLoadManager, isNavigationKey, isSelectionKey } from './auto-load-manager';
 
@@ -127,6 +121,9 @@ export class DashReaderView extends ItemView {
 
   /** Hotkey handler */
   private hotkeyHandler: HotkeyHandler;
+
+  /** Minimap navigation manager */
+  private minimapManager: MinimapManager;
 
   // ──────────────────────────────────────────────────────────────────────
   // DOM Element References
@@ -248,6 +245,19 @@ export class DashReaderView extends ItemView {
       onDecrementWpm: () => this.changeValue('wpm', -10),
       onQuit: () => this.engine.stop()
     });
+    this.minimapManager = new MinimapManager(this.mainContainerEl, this.engine);
+
+    // Display welcome message now that wordDisplay is initialized
+    this.wordDisplay.displayWelcomeMessage(
+      ICONS.book,
+      'Select text to start reading',
+      'or use Cmd+P → "Read selected text"'
+    );
+
+    // Apply initial visibility settings
+    this.toggleContextDisplay();
+    this.toggleMinimapDisplay();
+    this.toggleBreadcrumbDisplay();
 
     this.setupHotkeys();
 
@@ -365,7 +375,7 @@ export class DashReaderView extends ItemView {
     this.wordEl.style.fontSize = `${this.settings.fontSize}px`;
     this.wordEl.style.fontFamily = this.settings.fontFamily;
     this.wordEl.style.color = this.settings.fontColor;
-    this.wordEl.innerHTML = createWelcomeMessage();
+    // Welcome message will be set after wordDisplay is initialized
     this.dom.register('wordEl', this.wordEl);
 
     // Context after (optional)
@@ -509,6 +519,26 @@ export class DashReaderView extends ItemView {
       },
     });
 
+    // Minimap toggle
+    createToggleControl(this.settingsEl, {
+      label: 'Minimap',
+      checked: this.settings.showMinimap,
+      onChange: (checked) => {
+        this.settings.showMinimap = checked;
+        this.toggleMinimapDisplay();
+      },
+    });
+
+    // Breadcrumb toggle
+    createToggleControl(this.settingsEl, {
+      label: 'Breadcrumb',
+      checked: this.settings.showBreadcrumb,
+      onChange: (checked) => {
+        this.settings.showBreadcrumb = checked;
+        this.toggleBreadcrumbDisplay();
+      },
+    });
+
     // Micropause toggle
     createToggleControl(this.settingsEl, {
       label: 'Micropause',
@@ -603,6 +633,29 @@ export class DashReaderView extends ItemView {
     }
     if (this.contextAfterEl) {
       this.contextAfterEl.style.display = display;
+    }
+  }
+
+  /**
+   * Toggle minimap visibility
+   */
+  private toggleMinimapDisplay(): void {
+    if (this.minimapManager) {
+      if (this.settings.showMinimap) {
+        this.minimapManager.show();
+      } else {
+        this.minimapManager.hide();
+      }
+    }
+  }
+
+  /**
+   * Toggle breadcrumb visibility
+   */
+  private toggleBreadcrumbDisplay(): void {
+    const display = this.settings.showBreadcrumb ? 'flex' : 'none';
+    if (this.breadcrumbEl) {
+      this.breadcrumbEl.style.display = display;
     }
   }
 
@@ -789,6 +842,11 @@ export class DashReaderView extends ItemView {
       }
     }
 
+    // Update minimap current position
+    if (this.minimapManager) {
+      this.minimapManager.updateCurrentPosition(chunk.index);
+    }
+
     // Update context
     if (this.settings.showContext && this.contextBeforeEl && this.contextAfterEl) {
       const context = this.engine.getContext(this.settings.contextWords);
@@ -803,108 +861,6 @@ export class DashReaderView extends ItemView {
     // Update stats
     this.state.increment('wordsRead');
     this.updateStats();
-  }
-
-  /**
-   * Displays a word with heading or callout-based styling
-   *
-   * @param word - Word to display
-   * @param headingLevel - Heading level (1-6) or 0 for normal text/callouts
-   * @param showSeparator - Whether to show separator line before heading/callout
-   * @param calloutType - Callout type (note, abstract, info, etc.) if this is a callout
-   */
-  private displayWordWithHeading(word: string, headingLevel: number, showSeparator: boolean = false, calloutType?: string): void {
-    // Callout icon mapping
-    const calloutIcons: Record<string, string> = {
-      note: '📝',
-      abstract: '📄',
-      info: 'ℹ️',
-      tip: '💡',
-      success: '✅',
-      question: '❓',
-      warning: '⚠️',
-      failure: '❌',
-      danger: '⚡',
-      bug: '🐛',
-      example: '📋',
-      quote: '💬'
-    };
-
-    // Calculate font size based on heading level or callout
-    let fontSizeMultiplier = 1.0;
-    let fontWeight = 'normal';
-    let iconPrefix = '';
-
-    if (calloutType) {
-      // Callouts: slightly larger font, with icon prefix
-      fontSizeMultiplier = 1.2;
-      fontWeight = 'bold';
-      iconPrefix = calloutIcons[calloutType.toLowerCase()] || '📌';
-    } else if (headingLevel > 0) {
-      // Headings: size based on level
-      const multipliers = [
-        0,
-        HEADING_MULTIPLIERS.h1,
-        HEADING_MULTIPLIERS.h2,
-        HEADING_MULTIPLIERS.h3,
-        HEADING_MULTIPLIERS.h4,
-        HEADING_MULTIPLIERS.h5,
-        HEADING_MULTIPLIERS.h6
-      ];
-      fontSizeMultiplier = multipliers[headingLevel] || 1.0;
-      fontWeight = 'bold';
-    }
-
-    const adjustedFontSize = this.settings.fontSize * fontSizeMultiplier;
-    const processedWord = this.processWord(word);
-
-    // Clear and rebuild using DOM API (not innerHTML)
-    this.wordEl.empty();
-
-    // Add separator if needed
-    if (showSeparator) {
-      this.wordEl.createDiv({ cls: 'dashreader-heading-separator' });
-    }
-
-    // Create word container
-    const wordContainer = this.wordEl.createDiv({ cls: 'dashreader-word-with-heading' });
-    wordContainer.style.fontSize = `${adjustedFontSize}px`;
-    wordContainer.style.fontWeight = fontWeight;
-
-    // Add icon prefix if callout
-    if (iconPrefix) {
-      const iconSpan = wordContainer.createSpan({ text: iconPrefix });
-      iconSpan.style.marginRight = '8px';
-      iconSpan.style.opacity = '0.8';
-    }
-
-    // Add processed word (may contain HTML for highlighting)
-    wordContainer.innerHTML = processedWord;
-  }
-
-  /**
-   * Processes a word for display with center character highlighting
-   * Escapes HTML to prevent XSS attacks
-   *
-   * @param word - Word to process
-   * @returns HTML string with highlighted center character
-   */
-  private processWord(word: string): string {
-    const cleanWord = word.trim();
-    const center = Math.max(Math.floor(cleanWord.length / 2) - 1, 0);
-
-    let result = '';
-    for (let i = 0; i < cleanWord.length; i++) {
-      const escapedChar = escapeHtml(cleanWord[i]);
-
-      if (i === center) {
-        result += `<span class="${CSS_CLASSES.highlight}" style="color: ${this.settings.highlightColor}">${escapedChar}</span>`;
-      } else {
-        result += escapedChar;
-      }
-    }
-
-    return result;
   }
 
   /**
@@ -993,16 +949,6 @@ export class DashReaderView extends ItemView {
 
     this.wordEl.empty();
 
-    // Prepare source info for display
-    let sourceInfo = '';
-    if (source?.fileName) {
-      const escapedFileName = escapeHtml(source.fileName);
-      const lineInfo = source.lineNumber ? ` (line ${source.lineNumber})` : '';
-      sourceInfo = `<div class="dashreader-ready-source">
-        ${ICONS.file} ${escapedFileName}${lineInfo}
-      </div>`;
-    }
-
     // Calculate stats
     const totalWords = this.engine.getTotalWords();
     const remainingWords = this.engine.getRemainingWords();
@@ -1016,8 +962,15 @@ export class DashReaderView extends ItemView {
       : `${totalWords} words`;
     this.dom.updateText('statsText', `${wordInfo} loaded${fileInfo} - ~${durationText} - Shift+Space to start`);
 
-    // Display ready message
-    this.wordEl.innerHTML = createReadyMessage(remainingWords, totalWords, wordIndexFromCursor, durationText, sourceInfo);
+    // Display ready message using DOM API (not innerHTML for security)
+    this.wordDisplay.displayReadyMessage(
+      remainingWords,
+      totalWords,
+      wordIndexFromCursor,
+      durationText,
+      source?.fileName,
+      source?.lineNumber
+    );
 
     // Display initial breadcrumb (before starting reading)
     const allHeadings = this.engine.getHeadings();
@@ -1050,6 +1003,11 @@ export class DashReaderView extends ItemView {
           this.breadcrumbManager.updateBreadcrumb(initialContext);
         }
       }
+    }
+
+    // Render minimap with headings
+    if (this.minimapManager) {
+      this.minimapManager.render();
     }
 
     // Auto-start if enabled

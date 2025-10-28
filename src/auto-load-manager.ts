@@ -398,7 +398,6 @@ export class AutoLoadManager {
     // Case 2: No selection - reload from cursor position
     if (content.fullContent && content.fullContent.trim().length > TEXT_LIMITS.minContentLength) {
       if (content.cursorPosition !== this.state.lastCursorPosition) {
-        const positionDiff = Math.abs(content.cursorPosition! - this.state.lastCursorPosition);
         this.loadTextCallback(content.fullContent, {
           fileName: content.fileName,
           cursorPosition: content.cursorPosition,

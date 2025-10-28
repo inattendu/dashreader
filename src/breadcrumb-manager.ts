@@ -8,10 +8,9 @@
  * - Navigate to headings with play/pause handling
  */
 
-import { HeadingContext, HeadingInfo } from './types';
+import { HeadingContext } from './types';
 import { MenuBuilder } from './menu-builder';
 import { RSVPEngine } from './rsvp-engine';
-import { ICONS } from './constants';
 
 export class BreadcrumbManager {
   private breadcrumbEl: HTMLElement;
@@ -54,47 +53,32 @@ export class BreadcrumbManager {
       return;
     }
 
-    // Show breadcrumb
+    // Show breadcrumb (display: flex already in CSS)
     this.breadcrumbEl.style.display = 'flex';
-    this.breadcrumbEl.style.flexDirection = 'column';
-    this.breadcrumbEl.style.gap = '8px';
     this.breadcrumbEl.empty();
 
-    // === BREADCRUMB HEADER (Outline button) ===
-    const breadcrumbHeader = this.breadcrumbEl.createDiv({
-      cls: 'dashreader-breadcrumb-header'
+    // === SIMPLIFIED BREADCRUMB: 📑 H1 › H2 › H3 ▼ ===
+
+    // Document icon
+    this.breadcrumbEl.createSpan({
+      text: '📑',
+      cls: 'dashreader-breadcrumb-icon'
     });
 
-    // Outline button - opens full document structure
-    const outlineButton = breadcrumbHeader.createSpan({
-      text: '≡',
-      cls: 'dashreader-outline-button'
-    });
-
-    outlineButton.addEventListener('click', () => {
-      this.showOutlineMenu(outlineButton);
-    });
-
-    // === BREADCRUMB PATH CONTAINER ===
-    const breadcrumbPath = this.breadcrumbEl.createDiv({
-      cls: 'dashreader-breadcrumb-path'
-    });
-
-    // Build breadcrumb items
+    // Build breadcrumb path
     context.breadcrumb.forEach((heading, index) => {
       // Add separator between items
       if (index > 0) {
-        breadcrumbPath.createSpan({
+        this.breadcrumbEl.createSpan({
           text: '›',
           cls: 'dashreader-breadcrumb-separator'
         });
       }
 
-      // Create breadcrumb item container
-      const itemContainer = breadcrumbPath.createSpan({
+      // Create breadcrumb item (clickable text)
+      const itemSpan = this.breadcrumbEl.createSpan({
         cls: 'dashreader-breadcrumb-item'
       });
-      itemContainer.style.cursor = 'pointer';
 
       // Callout icon if applicable
       const calloutMatch = heading.text.match(/^\[CALLOUT:([\w-]+)\]/);
@@ -107,48 +91,33 @@ export class BreadcrumbManager {
         displayText = heading.text.replace(/^\[CALLOUT:[\w-]+\]/, '').trim();
       }
 
-      // Add icon if present
-      if (icon) {
-        const iconSpan = itemContainer.createSpan({ text: icon });
-        iconSpan.style.marginRight = '4px';
-      }
+      // Build text with optional icon
+      itemSpan.textContent = icon ? `${icon} ${displayText}` : displayText;
 
-      // Add heading text
-      itemContainer.createSpan({ text: displayText });
-
-      // Add dropdown indicator (▼) for sibling navigation
-      const dropdown = itemContainer.createSpan({
-        text: '▼',
-        cls: 'dashreader-breadcrumb-dropdown'
+      // Click on item -> navigate to heading
+      itemSpan.addEventListener('click', () => {
+        this.navigateToHeading(heading.wordIndex);
       });
+    });
 
-      // Click on text -> navigate to heading
-      itemContainer.addEventListener('click', (e) => {
-        if (e.target !== dropdown) {
-          this.navigateToHeading(heading.wordIndex);
-        }
-      });
+    // Single dropdown at the end - opens full outline
+    const dropdown = this.breadcrumbEl.createSpan({
+      text: '▼',
+      cls: 'dashreader-breadcrumb-dropdown'
+    });
 
-      // Click on dropdown -> show siblings menu
-      dropdown.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this.showHeadingMenu(heading, itemContainer);
-      });
+    dropdown.addEventListener('click', () => {
+      this.showOutlineMenu(dropdown);
     });
 
     this.lastHeadingContext = context;
   }
 
   /**
-   * Closes all open menus (heading and outline menus)
+   * Closes all open menus (outline menus)
    * Called before opening a new menu to ensure only one menu is visible
    */
   private closeAllMenus(): void {
-    // Remove all heading menus
-    document.querySelectorAll('.dashreader-heading-menu').forEach(menu => {
-      menu.remove();
-    });
-
     // Remove all outline menus
     document.querySelectorAll('.dashreader-outline-menu').forEach(menu => {
       menu.remove();
@@ -175,102 +144,6 @@ export class BreadcrumbManager {
     }
 
     return false; // No change
-  }
-
-  /**
-   * Shows dropdown menu with sibling headings (same level under same parent)
-   *
-   * @param currentHeading - The heading whose siblings to show
-   * @param anchorEl - The element to position the menu relative to
-   */
-  private showHeadingMenu(currentHeading: HeadingInfo, anchorEl: HTMLElement): void {
-    // Close any existing menus first
-    this.closeAllMenus();
-
-    // Get siblings (same level headings under the same parent)
-    const allHeadings = this.engine.getHeadings();
-
-    // Find parent of current heading (last heading before current with level < current.level)
-    let parentHeading: HeadingInfo | null = null;
-    let currentIndex = -1;
-
-    for (let i = 0; i < allHeadings.length; i++) {
-      if (allHeadings[i].wordIndex === currentHeading.wordIndex) {
-        currentIndex = i;
-        break;
-      }
-    }
-
-    // Look backwards from current to find parent
-    if (currentIndex > 0) {
-      for (let i = currentIndex - 1; i >= 0; i--) {
-        if (allHeadings[i].level < currentHeading.level) {
-          parentHeading = allHeadings[i];
-          break;
-        }
-      }
-    }
-
-    // Find all siblings: same level, between parent and next sibling of parent
-    const siblings: HeadingInfo[] = [];
-
-    for (let i = 0; i < allHeadings.length; i++) {
-      const heading = allHeadings[i];
-
-      // Must be same level as current
-      if (heading.level !== currentHeading.level) {
-        continue;
-      }
-
-      // Must come after parent (or at start if no parent)
-      if (parentHeading && heading.wordIndex <= parentHeading.wordIndex) {
-        continue;
-      }
-
-      // Must come before next heading at parent's level or higher
-      // Find the next heading that closes the parent's section
-      let isUnderSameParent = true;
-      if (parentHeading) {
-        // Look for any heading at parent level or higher that comes after parent
-        for (let j = 0; j < allHeadings.length; j++) {
-          const other = allHeadings[j];
-
-          // Is this a heading at parent's level or higher (less deep)?
-          if (other.level <= parentHeading.level &&
-              other.wordIndex > parentHeading.wordIndex) {
-            // If our heading comes at or after this boundary, it's not a sibling
-            if (heading.wordIndex >= other.wordIndex) {
-              isUnderSameParent = false;
-              break;
-            }
-          }
-        }
-      }
-
-      if (isUnderSameParent) {
-        siblings.push(heading);
-      }
-    }
-
-    if (siblings.length <= 1) {
-      // No other siblings, nothing to navigate to
-      return;
-    }
-
-    // Create menu using MenuBuilder
-    MenuBuilder.createMenu({
-      anchorEl: anchorEl,
-      cssClass: 'dashreader-heading-menu',
-      items: siblings.map(h => ({
-        text: h.text,
-        wordIndex: h.wordIndex,
-        level: h.level,
-        isCurrent: h.wordIndex === currentHeading.wordIndex
-      })),
-      onItemClick: (wordIndex) => this.navigateToHeading(wordIndex),
-      showLevel: false,
-      indentByLevel: false
-    });
   }
 
   /**

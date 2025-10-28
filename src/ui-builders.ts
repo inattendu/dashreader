@@ -684,55 +684,10 @@ export function escapeHtml(text: string): string {
 }
 
 /**
- * Creates the welcome message HTML
- *
- * Displayed when DashReader is opened but no text is loaded yet.
- * Instructs user how to start reading.
- *
- * @returns HTML string for welcome message
+ * @deprecated These message functions have been moved to WordDisplay class
+ * to use DOM API instead of innerHTML for security compliance.
+ * See WordDisplay.displayWelcomeMessage() and WordDisplay.displayReadyMessage()
  */
-export function createWelcomeMessage(): string {
-  return `
-    <div class="dashreader-welcome-message">
-      <div class="dashreader-welcome-icon">${ICONS.book} Select text to start reading</div>
-      <div class="dashreader-welcome-instruction">or use Cmd+P → "Read selected text"</div>
-    </div>
-  `;
-}
-
-/**
- * Creates the "ready to read" message HTML
- *
- * Displayed after text is loaded but before reading starts.
- * Shows word count, estimated duration, and instructions.
- *
- * @param wordsToRead - Number of words to read
- * @param totalWords - Total words in document
- * @param startIndex - Starting word index (if resuming)
- * @param durationText - Formatted estimated duration
- * @param sourceInfo - Optional source file information HTML
- * @returns HTML string for ready message
- */
-export function createReadyMessage(
-  wordsToRead: number,
-  totalWords: number,
-  startIndex: number | undefined,
-  durationText: string,
-  sourceInfo: string = ''
-): string {
-  const startInfo = startIndex !== undefined && startIndex > 0
-    ? ` <span class="dashreader-ready-start-info">(starting at word ${startIndex + 1}/${totalWords})</span>`
-    : '';
-
-  return `
-    <div class="dashreader-ready-message">
-      ${sourceInfo}
-      Ready to read ${wordsToRead} words${startInfo}<br/>
-      <span class="dashreader-ready-duration">Estimated time: ~${durationText}</span><br/>
-      <span class="dashreader-ready-duration">Press Shift+Space to start</span>
-    </div>
-  `;
-}
 
 // ============================================================================
 // SECTION 6: LEGACY UTILITIES
@@ -755,8 +710,8 @@ export function createReadyMessage(
  */
 export function togglePanel(
   panel: HTMLElement,
-  registry: DOMRegistry,
-  registryKey: string,
+  _registry: DOMRegistry,
+  _registryKey: string,
   currentState: boolean
 ): boolean {
   const newState = !currentState;

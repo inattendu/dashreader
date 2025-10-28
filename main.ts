@@ -8,8 +8,6 @@ export default class DashReaderPlugin extends Plugin {
   private view: DashReaderView | null = null;
 
   async onload() {
-    console.log('Loading DashReader plugin');
-
     await this.loadSettings();
 
     // Enregistrer la vue
@@ -114,12 +112,9 @@ export default class DashReaderPlugin extends Plugin {
         }
       })
     );
-
-    console.log('DashReader plugin loaded successfully');
   }
 
   onunload() {
-    console.log('Unloading DashReader plugin');
     // Don't detach leaves here - let Obsidian restore them at original positions during updates
   }
 

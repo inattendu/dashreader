@@ -444,7 +444,7 @@ var MarkdownParser = class {
     let text = markdown;
     text = text.replace(/^---[\s\S]*?---\n?/m, "");
     const codeBlocks = [];
-    text = text.replace(/```[\w-]*\n?([\s\S]*?)```/g, (match, code) => {
+    text = text.replace(/```[\w-]*\n?([\s\S]*?)```/g, (_match, code) => {
       const index = codeBlocks.length;
       codeBlocks.push(code);
       return `___CODE_BLOCK_${index}___`;
@@ -452,7 +452,7 @@ var MarkdownParser = class {
     text = text.replace(/`([^`]+)`/g, "$1");
     text = text.replace(/!\[([^\]]*)\]\([^\)]+\)/g, "");
     text = text.replace(/\[([^\]]+)\]\([^\)]+\)/g, "$1");
-    text = text.replace(/\[\[([^\]|]+)(\|([^\]]+))?\]\]/g, (match, link, pipe, alias) => {
+    text = text.replace(/\[\[([^\]|]+)(\|([^\]]+))?\]\]/g, (_match, link, _pipe, alias) => {
       return alias || link;
     });
     text = text.replace(/\*\*\*([^\*]+)\*\*\*/g, "$1");
@@ -462,11 +462,11 @@ var MarkdownParser = class {
     text = text.replace(/_([^_\n]+)_/g, "$1");
     text = text.replace(/~~([^~]+)~~/g, "$1");
     text = text.replace(/==([^=]+)==/g, "$1");
-    text = text.replace(/^(#{1,6})\s+(.+)$/gm, (match, hashes, content) => {
+    text = text.replace(/^(#{1,6})\s+(.+)$/gm, (_match, hashes, content) => {
       const level = hashes.length;
       return `[H${level}]${content}`;
     });
-    text = text.replace(/^>\s*\[!([\w-]+)\]\s*(.*)$/gm, (match, type, title) => {
+    text = text.replace(/^>\s*\[!([\w-]+)\]\s*(.*)$/gm, (_match, type, title) => {
       const displayTitle = title.trim() || type;
       return `[CALLOUT:${type}]${displayTitle}`;
     });
@@ -484,7 +484,7 @@ var MarkdownParser = class {
     text = text.replace(/\n{3,}/g, "\n\n");
     text = text.replace(/^[ \t]+/gm, "");
     text = text.replace(/[ \t]+$/gm, "");
-    text = text.replace(/___CODE_BLOCK_(\d+)___/g, (match, index) => {
+    text = text.replace(/___CODE_BLOCK_(\d+)___/g, (_match, index) => {
       return codeBlocks[parseInt(index)] || "";
     });
     text = text.trim();
@@ -922,32 +922,27 @@ var DOMRegistry = class {
     }
   }
   /**
-   * Update HTML content of a registered element
+   * @deprecated REMOVED for Obsidian security compliance.
    *
-   * **⚠️ WARNING**: Use with caution! Ensure content is properly escaped to
-   * prevent XSS attacks. Prefer updateText() for plain text content.
+   * Using innerHTML with any content is discouraged by Obsidian plugin guidelines.
+   * Instead, use DOM API methods to build HTML structures:
+   * - element.createEl(), element.createSpan(), element.createDiv()
+   * - element.setText() for text content (automatically escapes)
+   * - element.empty() to clear contents
    *
-   * Only use this when you need to render HTML markup (e.g., syntax highlighting,
-   * formatted text with spans, etc.) and you're certain the content is safe.
+   * See: https://docs.obsidian.md/Plugins/Releasing/Plugin+guidelines
    *
-   * @param key - Key of the element to update
-   * @param html - HTML string to set (MUST be escaped if user-generated)
-   *
-   * @example
+   * Migration example:
    * ```typescript
-   * // Safe: Generated HTML with no user input
-   * this.dom.updateHTML('wordEl', `<span class="highlight">Word</span>`);
+   * // OLD (unsafe):
+   * this.dom.updateHTML('wordEl', `<span class="highlight">${word}</span>`);
    *
-   * // UNSAFE: Never do this with user content
-   * // this.dom.updateHTML('wordEl', userInput); // ❌ XSS risk!
+   * // NEW (safe):
+   * const element = this.dom.get('wordEl');
+   * element.empty();
+   * element.createSpan({ text: word, cls: 'highlight' });
    * ```
    */
-  updateHTML(key, html) {
-    const element = this.elements.get(key);
-    if (element) {
-      element.innerHTML = html;
-    }
-  }
   /**
    * Update a CSS style property of a registered element
    *
@@ -1280,33 +1275,21 @@ var BreadcrumbManager = class {
       return;
     }
     this.breadcrumbEl.style.display = "flex";
-    this.breadcrumbEl.style.flexDirection = "column";
-    this.breadcrumbEl.style.gap = "8px";
     this.breadcrumbEl.empty();
-    const breadcrumbHeader = this.breadcrumbEl.createDiv({
-      cls: "dashreader-breadcrumb-header"
-    });
-    const outlineButton = breadcrumbHeader.createSpan({
-      text: "\u2261",
-      cls: "dashreader-outline-button"
-    });
-    outlineButton.addEventListener("click", () => {
-      this.showOutlineMenu(outlineButton);
-    });
-    const breadcrumbPath = this.breadcrumbEl.createDiv({
-      cls: "dashreader-breadcrumb-path"
+    this.breadcrumbEl.createSpan({
+      text: "\u{1F4D1}",
+      cls: "dashreader-breadcrumb-icon"
     });
     context.breadcrumb.forEach((heading, index) => {
       if (index > 0) {
-        breadcrumbPath.createSpan({
+        this.breadcrumbEl.createSpan({
           text: "\u203A",
           cls: "dashreader-breadcrumb-separator"
         });
       }
-      const itemContainer = breadcrumbPath.createSpan({
+      const itemSpan = this.breadcrumbEl.createSpan({
         cls: "dashreader-breadcrumb-item"
       });
-      itemContainer.style.cursor = "pointer";
       const calloutMatch = heading.text.match(/^\[CALLOUT:([\w-]+)\]/);
       let displayText = heading.text;
       let icon = "";
@@ -1315,35 +1298,25 @@ var BreadcrumbManager = class {
         icon = this.calloutIcons[calloutType.toLowerCase()] || "\u{1F4CC}";
         displayText = heading.text.replace(/^\[CALLOUT:[\w-]+\]/, "").trim();
       }
-      if (icon) {
-        const iconSpan = itemContainer.createSpan({ text: icon });
-        iconSpan.style.marginRight = "4px";
-      }
-      itemContainer.createSpan({ text: displayText });
-      const dropdown = itemContainer.createSpan({
-        text: "\u25BC",
-        cls: "dashreader-breadcrumb-dropdown"
+      itemSpan.textContent = icon ? `${icon} ${displayText}` : displayText;
+      itemSpan.addEventListener("click", () => {
+        this.navigateToHeading(heading.wordIndex);
       });
-      itemContainer.addEventListener("click", (e) => {
-        if (e.target !== dropdown) {
-          this.navigateToHeading(heading.wordIndex);
-        }
-      });
-      dropdown.addEventListener("click", (e) => {
-        e.stopPropagation();
-        this.showHeadingMenu(heading, itemContainer);
-      });
+    });
+    const dropdown = this.breadcrumbEl.createSpan({
+      text: "\u25BC",
+      cls: "dashreader-breadcrumb-dropdown"
+    });
+    dropdown.addEventListener("click", () => {
+      this.showOutlineMenu(dropdown);
     });
     this.lastHeadingContext = context;
   }
   /**
-   * Closes all open menus (heading and outline menus)
+   * Closes all open menus (outline menus)
    * Called before opening a new menu to ensure only one menu is visible
    */
   closeAllMenus() {
-    document.querySelectorAll(".dashreader-heading-menu").forEach((menu) => {
-      menu.remove();
-    });
     document.querySelectorAll(".dashreader-outline-menu").forEach((menu) => {
       menu.remove();
     });
@@ -1366,73 +1339,6 @@ var BreadcrumbManager = class {
       }
     }
     return false;
-  }
-  /**
-   * Shows dropdown menu with sibling headings (same level under same parent)
-   *
-   * @param currentHeading - The heading whose siblings to show
-   * @param anchorEl - The element to position the menu relative to
-   */
-  showHeadingMenu(currentHeading, anchorEl) {
-    this.closeAllMenus();
-    const allHeadings = this.engine.getHeadings();
-    let parentHeading = null;
-    let currentIndex = -1;
-    for (let i = 0; i < allHeadings.length; i++) {
-      if (allHeadings[i].wordIndex === currentHeading.wordIndex) {
-        currentIndex = i;
-        break;
-      }
-    }
-    if (currentIndex > 0) {
-      for (let i = currentIndex - 1; i >= 0; i--) {
-        if (allHeadings[i].level < currentHeading.level) {
-          parentHeading = allHeadings[i];
-          break;
-        }
-      }
-    }
-    const siblings = [];
-    for (let i = 0; i < allHeadings.length; i++) {
-      const heading = allHeadings[i];
-      if (heading.level !== currentHeading.level) {
-        continue;
-      }
-      if (parentHeading && heading.wordIndex <= parentHeading.wordIndex) {
-        continue;
-      }
-      let isUnderSameParent = true;
-      if (parentHeading) {
-        for (let j = 0; j < allHeadings.length; j++) {
-          const other = allHeadings[j];
-          if (other.level <= parentHeading.level && other.wordIndex > parentHeading.wordIndex) {
-            if (heading.wordIndex >= other.wordIndex) {
-              isUnderSameParent = false;
-              break;
-            }
-          }
-        }
-      }
-      if (isUnderSameParent) {
-        siblings.push(heading);
-      }
-    }
-    if (siblings.length <= 1) {
-      return;
-    }
-    MenuBuilder.createMenu({
-      anchorEl,
-      cssClass: "dashreader-heading-menu",
-      items: siblings.map((h) => ({
-        text: h.text,
-        wordIndex: h.wordIndex,
-        level: h.level,
-        isCurrent: h.wordIndex === currentHeading.wordIndex
-      })),
-      onItemClick: (wordIndex) => this.navigateToHeading(wordIndex),
-      showLevel: false,
-      indentByLevel: false
-    });
   }
   /**
    * Shows outline menu with all headings in the document
@@ -1498,103 +1404,6 @@ var BreadcrumbManager = class {
   }
 };
 
-// src/ui-builders.ts
-function createButton(parent, config) {
-  const className = config.className ? `${CSS_CLASSES.btn} ${config.className}` : CSS_CLASSES.btn;
-  const btn = parent.createEl("button", {
-    text: config.icon,
-    cls: className,
-    attr: { title: config.title }
-  });
-  btn.addEventListener("click", config.onClick);
-  return btn;
-}
-function createNumberControl(parent, config, registry) {
-  const container = parent.createDiv({ cls: CSS_CLASSES.controlGroup });
-  container.createEl("span", {
-    text: config.label,
-    cls: CSS_CLASSES.controlLabel
-  });
-  createButton(container, {
-    icon: config.decrementIcon || ICONS.decrement,
-    title: config.decrementTitle || `Decrease (${config.increment || 1})`,
-    onClick: config.onDecrement,
-    className: CSS_CLASSES.smallBtn
-  });
-  const valueEl = container.createEl("span", {
-    text: String(config.value),
-    cls: config.registryKey || "value-display"
-  });
-  if (config.registryKey && registry) {
-    registry.register(config.registryKey, valueEl);
-  }
-  createButton(container, {
-    icon: config.incrementIcon || ICONS.increment,
-    title: config.incrementTitle || `Increase (+${config.increment || 1})`,
-    onClick: config.onIncrement,
-    className: CSS_CLASSES.smallBtn
-  });
-  return { container, valueEl };
-}
-function createToggleControl(parent, config) {
-  const container = parent.createDiv({ cls: CSS_CLASSES.settingGroup });
-  const toggle = container.createEl("label", { cls: CSS_CLASSES.settingToggle });
-  const checkbox = toggle.createEl("input", { type: "checkbox" });
-  checkbox.checked = config.checked;
-  checkbox.addEventListener("change", () => {
-    config.onChange(checkbox.checked);
-  });
-  toggle.createEl("span", { text: ` ${config.label}` });
-  return { container, checkbox };
-}
-function createPlayPauseButtons(parent, onPlay, onPause, registry) {
-  const playBtn = createButton(parent, {
-    icon: ICONS.play,
-    title: "Play (Shift+Space)",
-    onClick: onPlay,
-    className: CSS_CLASSES.playBtn
-  });
-  const pauseBtn = createButton(parent, {
-    icon: ICONS.pause,
-    title: "Pause (Shift+Space)",
-    onClick: onPause,
-    className: `${CSS_CLASSES.pauseBtn} ${CSS_CLASSES.hidden}`
-  });
-  registry.register("playBtn", playBtn);
-  registry.register("pauseBtn", pauseBtn);
-}
-function updatePlayPauseButtons(registry, isPlaying) {
-  registry.toggleClass("playBtn", CSS_CLASSES.hidden, isPlaying);
-  registry.toggleClass("pauseBtn", CSS_CLASSES.hidden, !isPlaying);
-}
-function formatTime(seconds) {
-  const mins = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  return `${mins}:${secs.toString().padStart(2, "0")}`;
-}
-function escapeHtml(text) {
-  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
-}
-function createWelcomeMessage() {
-  return `
-    <div class="dashreader-welcome-message">
-      <div class="dashreader-welcome-icon">${ICONS.book} Select text to start reading</div>
-      <div class="dashreader-welcome-instruction">or use Cmd+P \u2192 "Read selected text"</div>
-    </div>
-  `;
-}
-function createReadyMessage(wordsToRead, totalWords, startIndex, durationText, sourceInfo = "") {
-  const startInfo = startIndex !== void 0 && startIndex > 0 ? ` <span class="dashreader-ready-start-info">(starting at word ${startIndex + 1}/${totalWords})</span>` : "";
-  return `
-    <div class="dashreader-ready-message">
-      ${sourceInfo}
-      Ready to read ${wordsToRead} words${startInfo}<br/>
-      <span class="dashreader-ready-duration">Estimated time: ~${durationText}</span><br/>
-      <span class="dashreader-ready-duration">Press Shift+Space to start</span>
-    </div>
-  `;
-}
-
 // src/word-display.ts
 var WordDisplay = class {
   constructor(wordEl, settings) {
@@ -1657,7 +1466,6 @@ var WordDisplay = class {
       fontWeight = "bold";
     }
     const adjustedFontSize = this.settings.fontSize * fontSizeMultiplier;
-    const processedWord = this.processWord(word);
     this.wordEl.empty();
     if (showSeparator) {
       this.wordEl.createDiv({ cls: "dashreader-heading-separator" });
@@ -1666,41 +1474,103 @@ var WordDisplay = class {
     wordContainer.style.fontSize = `${adjustedFontSize}px`;
     wordContainer.style.fontWeight = fontWeight;
     if (iconPrefix) {
-      const iconSpan = wordContainer.createSpan({ text: iconPrefix });
-      iconSpan.style.marginRight = "8px";
-      iconSpan.style.opacity = "0.8";
+      wordContainer.createSpan({
+        text: iconPrefix,
+        cls: "dashreader-callout-icon"
+      });
     }
-    wordContainer.innerHTML = processedWord;
+    this.addProcessedWord(wordContainer, word);
   }
   /**
-   * Processes a word for display with center character highlighting
-   * Escapes HTML to prevent XSS attacks
+   * Adds a processed word to the container using DOM API
+   * This prevents XSS attacks by never using innerHTML with user content
    *
+   * @param container - Container element to add word to
    * @param rawWord - Raw word (may contain special characters)
-   * @returns HTML string with highlighted center character
    */
-  processWord(rawWord) {
+  addProcessedWord(container, rawWord) {
     if (rawWord === "\n") {
-      return "<br/>";
+      container.createEl("br");
+      return;
     }
-    let word = rawWord.replace(/^\[H\d\]/, "").replace(/^\[CALLOUT:[\w-]+\]/, "");
-    word = escapeHtml(word);
+    const word = rawWord.replace(/^\[H\d\]/, "").replace(/^\[CALLOUT:[\w-]+\]/, "");
     if (word.length > 0) {
       const centerIndex = Math.floor(word.length / 3);
       const before = word.substring(0, centerIndex);
       const center = word.charAt(centerIndex);
       const after = word.substring(centerIndex + 1);
-      return `${before}<span class="dashreader-highlight">${center}</span>${after}`;
+      if (before) {
+        container.createSpan({ text: before });
+      }
+      container.createSpan({
+        text: center,
+        cls: "dashreader-highlight"
+      });
+      if (after) {
+        container.createSpan({ text: after });
+      }
+    } else {
+      container.setText(word);
     }
-    return word;
   }
   /**
    * Displays a welcome message (no text loaded)
+   * Uses DOM API to build the message instead of innerHTML
    *
-   * @param message - HTML message to display
+   * @param icon - Icon to display
+   * @param mainText - Main message text
+   * @param subText - Instruction text
    */
-  displayMessage(message) {
-    this.wordEl.innerHTML = message;
+  displayWelcomeMessage(icon, mainText, subText) {
+    this.wordEl.empty();
+    const welcomeDiv = this.wordEl.createDiv({ cls: "dashreader-welcome-message" });
+    welcomeDiv.createDiv({
+      text: `${icon} ${mainText}`,
+      cls: "dashreader-welcome-icon"
+    });
+    welcomeDiv.createDiv({
+      text: subText,
+      cls: "dashreader-welcome-instruction"
+    });
+  }
+  /**
+   * Displays a ready message (text loaded, ready to start)
+   * Uses DOM API to build the message instead of innerHTML
+   *
+   * @param wordsToRead - Number of words to read
+   * @param totalWords - Total words in document
+   * @param startIndex - Starting word index (if resuming)
+   * @param durationText - Formatted estimated duration
+   * @param fileName - Optional source file name
+   * @param lineNumber - Optional source line number
+   */
+  displayReadyMessage(wordsToRead, totalWords, startIndex, durationText, fileName, lineNumber) {
+    this.wordEl.empty();
+    const readyDiv = this.wordEl.createDiv({ cls: "dashreader-ready-message" });
+    if (fileName) {
+      const sourceDiv = readyDiv.createDiv({ cls: "dashreader-ready-source" });
+      sourceDiv.createSpan({ text: "\u{1F4C4} " });
+      sourceDiv.createSpan({ text: fileName });
+      if (lineNumber) {
+        sourceDiv.createSpan({ text: ` (line ${lineNumber})` });
+      }
+    }
+    const mainText = readyDiv.createSpan();
+    mainText.createSpan({ text: `Ready to read ${wordsToRead} words` });
+    if (startIndex !== void 0 && startIndex > 0) {
+      const startInfo = mainText.createSpan({ cls: "dashreader-ready-start-info" });
+      startInfo.setText(` (starting at word ${startIndex + 1}/${totalWords})`);
+    }
+    readyDiv.createEl("br");
+    readyDiv.createSpan({
+      text: `Estimated time: ~${durationText}`,
+      cls: "dashreader-ready-duration"
+    });
+    readyDiv.createEl("br");
+    readyDiv.createSpan({
+      text: "Press Shift+Space to start",
+      cls: "dashreader-ready-duration"
+    });
   }
   /**
    * Clears the word display
@@ -1780,6 +1650,252 @@ var HotkeyHandler = class {
     return tagName === "input" || tagName === "textarea";
   }
 };
+
+// src/minimap-manager.ts
+var MinimapManager = class {
+  constructor(containerEl, engine) {
+    this.currentWordIndex = 0;
+    this.totalWords = 0;
+    this.containerEl = containerEl;
+    this.engine = engine;
+    this.minimapEl = null;
+    this.progressEl = null;
+    this.tooltipEl = null;
+    this.initialize();
+  }
+  /**
+   * Initialize the minimap structure
+   */
+  initialize() {
+    this.minimapEl = this.containerEl.createDiv({
+      cls: "dashreader-minimap"
+    });
+    this.progressEl = this.minimapEl.createDiv({
+      cls: "dashreader-minimap-progress"
+    });
+    this.minimapEl.createDiv({
+      cls: "dashreader-minimap-line"
+    });
+    this.tooltipEl = document.body.createDiv({
+      cls: "dashreader-minimap-tooltip"
+    });
+  }
+  /**
+   * Render the minimap with heading points
+   * Called when text is loaded or structure changes
+   */
+  render() {
+    if (!this.minimapEl)
+      return;
+    const existingPoints = this.minimapEl.querySelectorAll(".dashreader-minimap-point");
+    existingPoints.forEach((point) => point.remove());
+    const headings = this.engine.getHeadings();
+    this.totalWords = this.engine.getTotalWords();
+    if (headings.length === 0 || this.totalWords === 0) {
+      this.minimapEl.style.display = "none";
+      return;
+    }
+    this.minimapEl.style.display = "block";
+    headings.forEach((heading, index) => {
+      this.createPoint(heading, index);
+    });
+    this.updateCurrentPosition(this.currentWordIndex);
+  }
+  /**
+   * Create a point for a heading
+   */
+  createPoint(heading, index) {
+    const point = this.minimapEl.createDiv({
+      cls: "dashreader-minimap-point"
+    });
+    const percentage = heading.wordIndex / this.totalWords * 100;
+    point.style.top = `${percentage}%`;
+    point.setAttribute("data-level", heading.level.toString());
+    point.setAttribute("data-index", index.toString());
+    point.setAttribute("data-word-index", heading.wordIndex.toString());
+    point.setAttribute("data-heading-text", heading.text);
+    point.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.navigateToHeading(heading.wordIndex);
+    });
+    point.addEventListener("mouseenter", () => {
+      this.showTooltip(heading.text, point);
+    });
+    point.addEventListener("mouseleave", () => {
+      this.hideTooltip();
+    });
+  }
+  /**
+   * Update which point is highlighted as current
+   */
+  updateCurrentPosition(wordIndex) {
+    this.currentWordIndex = wordIndex;
+    if (!this.minimapEl)
+      return;
+    if (this.progressEl && this.totalWords > 0) {
+      const progressPercentage = wordIndex / this.totalWords * 100;
+      this.progressEl.style.height = `${Math.min(100, Math.max(0, progressPercentage))}%`;
+    }
+    const headings = this.engine.getHeadings();
+    if (headings.length === 0)
+      return;
+    const relevantHeadings = headings.filter((h) => h.wordIndex <= wordIndex);
+    const currentHeading = relevantHeadings.length > 0 ? relevantHeadings[relevantHeadings.length - 1] : null;
+    const points = this.minimapEl.querySelectorAll(".dashreader-minimap-point");
+    points.forEach((point) => {
+      const pointWordIndex = parseInt(point.getAttribute("data-word-index") || "0");
+      if (currentHeading && pointWordIndex === currentHeading.wordIndex) {
+        point.classList.add("dashreader-minimap-point-current");
+      } else {
+        point.classList.remove("dashreader-minimap-point-current");
+      }
+    });
+  }
+  /**
+   * Navigate to a specific heading
+   */
+  navigateToHeading(wordIndex) {
+    const wasPlaying = this.engine.getIsPlaying();
+    if (wasPlaying) {
+      this.engine.pause();
+    }
+    const currentIndex = this.engine.getCurrentIndex();
+    const delta = wordIndex - currentIndex;
+    if (delta < 0) {
+      this.engine.rewind(Math.abs(delta));
+    } else if (delta > 0) {
+      this.engine.forward(delta);
+    }
+    if (wasPlaying) {
+      setTimeout(() => {
+        this.engine.play();
+      }, 300);
+    }
+  }
+  /**
+   * Show tooltip with heading text (slides from right)
+   */
+  showTooltip(text, pointEl) {
+    if (!this.tooltipEl)
+      return;
+    const cleanText = text.replace(/^\[H\d\]/, "").replace(/^\[CALLOUT:[\w-]+\]/, "").trim();
+    this.tooltipEl.textContent = cleanText;
+    const pointRect = pointEl.getBoundingClientRect();
+    const tooltipHeight = 32;
+    this.tooltipEl.style.top = `${pointRect.top + pointRect.height / 2 - tooltipHeight / 2}px`;
+    this.tooltipEl.classList.add("visible");
+  }
+  /**
+   * Hide tooltip
+   */
+  hideTooltip() {
+    if (!this.tooltipEl)
+      return;
+    this.tooltipEl.classList.remove("visible");
+  }
+  /**
+   * Show the minimap
+   */
+  show() {
+    if (this.minimapEl) {
+      this.minimapEl.style.display = "block";
+    }
+  }
+  /**
+   * Hide the minimap
+   */
+  hide() {
+    if (this.minimapEl) {
+      this.minimapEl.style.display = "none";
+    }
+  }
+  /**
+   * Clean up
+   */
+  destroy() {
+    if (this.minimapEl) {
+      this.minimapEl.remove();
+    }
+    if (this.tooltipEl) {
+      this.tooltipEl.remove();
+    }
+  }
+};
+
+// src/ui-builders.ts
+function createButton(parent, config) {
+  const className = config.className ? `${CSS_CLASSES.btn} ${config.className}` : CSS_CLASSES.btn;
+  const btn = parent.createEl("button", {
+    text: config.icon,
+    cls: className,
+    attr: { title: config.title }
+  });
+  btn.addEventListener("click", config.onClick);
+  return btn;
+}
+function createNumberControl(parent, config, registry) {
+  const container = parent.createDiv({ cls: CSS_CLASSES.controlGroup });
+  container.createEl("span", {
+    text: config.label,
+    cls: CSS_CLASSES.controlLabel
+  });
+  createButton(container, {
+    icon: config.decrementIcon || ICONS.decrement,
+    title: config.decrementTitle || `Decrease (${config.increment || 1})`,
+    onClick: config.onDecrement,
+    className: CSS_CLASSES.smallBtn
+  });
+  const valueEl = container.createEl("span", {
+    text: String(config.value),
+    cls: config.registryKey || "value-display"
+  });
+  if (config.registryKey && registry) {
+    registry.register(config.registryKey, valueEl);
+  }
+  createButton(container, {
+    icon: config.incrementIcon || ICONS.increment,
+    title: config.incrementTitle || `Increase (+${config.increment || 1})`,
+    onClick: config.onIncrement,
+    className: CSS_CLASSES.smallBtn
+  });
+  return { container, valueEl };
+}
+function createToggleControl(parent, config) {
+  const container = parent.createDiv({ cls: CSS_CLASSES.settingGroup });
+  const toggle = container.createEl("label", { cls: CSS_CLASSES.settingToggle });
+  const checkbox = toggle.createEl("input", { type: "checkbox" });
+  checkbox.checked = config.checked;
+  checkbox.addEventListener("change", () => {
+    config.onChange(checkbox.checked);
+  });
+  toggle.createEl("span", { text: ` ${config.label}` });
+  return { container, checkbox };
+}
+function createPlayPauseButtons(parent, onPlay, onPause, registry) {
+  const playBtn = createButton(parent, {
+    icon: ICONS.play,
+    title: "Play (Shift+Space)",
+    onClick: onPlay,
+    className: CSS_CLASSES.playBtn
+  });
+  const pauseBtn = createButton(parent, {
+    icon: ICONS.pause,
+    title: "Pause (Shift+Space)",
+    onClick: onPause,
+    className: `${CSS_CLASSES.pauseBtn} ${CSS_CLASSES.hidden}`
+  });
+  registry.register("playBtn", playBtn);
+  registry.register("pauseBtn", pauseBtn);
+}
+function updatePlayPauseButtons(registry, isPlaying) {
+  registry.toggleClass("playBtn", CSS_CLASSES.hidden, isPlaying);
+  registry.toggleClass("pauseBtn", CSS_CLASSES.hidden, !isPlaying);
+}
+function formatTime(seconds) {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
+}
 
 // src/auto-load-manager.ts
 var import_obsidian = require("obsidian");
@@ -1910,7 +2026,6 @@ var AutoLoadManager = class {
     }
     if (content.fullContent && content.fullContent.trim().length > TEXT_LIMITS.minContentLength) {
       if (content.cursorPosition !== this.state.lastCursorPosition) {
-        const positionDiff = Math.abs(content.cursorPosition - this.state.lastCursorPosition);
         this.loadTextCallback(content.fullContent, {
           fileName: content.fileName,
           cursorPosition: content.cursorPosition
@@ -2121,6 +2236,15 @@ var DashReaderView = class extends import_obsidian2.ItemView {
       onDecrementWpm: () => this.changeValue("wpm", -10),
       onQuit: () => this.engine.stop()
     });
+    this.minimapManager = new MinimapManager(this.mainContainerEl, this.engine);
+    this.wordDisplay.displayWelcomeMessage(
+      ICONS.book,
+      "Select text to start reading",
+      'or use Cmd+P \u2192 "Read selected text"'
+    );
+    this.toggleContextDisplay();
+    this.toggleMinimapDisplay();
+    this.toggleBreadcrumbDisplay();
     this.setupHotkeys();
     this.app.workspace.onLayoutReady(() => {
       this.setupAutoLoad();
@@ -2218,7 +2342,6 @@ var DashReaderView = class extends import_obsidian2.ItemView {
     this.wordEl.style.fontSize = `${this.settings.fontSize}px`;
     this.wordEl.style.fontFamily = this.settings.fontFamily;
     this.wordEl.style.color = this.settings.fontColor;
-    this.wordEl.innerHTML = createWelcomeMessage();
     this.dom.register("wordEl", this.wordEl);
     if (this.settings.showContext) {
       this.contextAfterEl = displayArea.createDiv({ cls: CSS_CLASSES.contextAfter });
@@ -2339,6 +2462,22 @@ var DashReaderView = class extends import_obsidian2.ItemView {
       }
     });
     createToggleControl(this.settingsEl, {
+      label: "Minimap",
+      checked: this.settings.showMinimap,
+      onChange: (checked) => {
+        this.settings.showMinimap = checked;
+        this.toggleMinimapDisplay();
+      }
+    });
+    createToggleControl(this.settingsEl, {
+      label: "Breadcrumb",
+      checked: this.settings.showBreadcrumb,
+      onChange: (checked) => {
+        this.settings.showBreadcrumb = checked;
+        this.toggleBreadcrumbDisplay();
+      }
+    });
+    createToggleControl(this.settingsEl, {
       label: "Micropause",
       checked: this.settings.enableMicropause,
       onChange: (checked) => {
@@ -2420,6 +2559,27 @@ var DashReaderView = class extends import_obsidian2.ItemView {
     }
     if (this.contextAfterEl) {
       this.contextAfterEl.style.display = display;
+    }
+  }
+  /**
+   * Toggle minimap visibility
+   */
+  toggleMinimapDisplay() {
+    if (this.minimapManager) {
+      if (this.settings.showMinimap) {
+        this.minimapManager.show();
+      } else {
+        this.minimapManager.hide();
+      }
+    }
+  }
+  /**
+   * Toggle breadcrumb visibility
+   */
+  toggleBreadcrumbDisplay() {
+    const display = this.settings.showBreadcrumb ? "flex" : "none";
+    if (this.breadcrumbEl) {
+      this.breadcrumbEl.style.display = display;
     }
   }
   /**
@@ -2571,6 +2731,9 @@ var DashReaderView = class extends import_obsidian2.ItemView {
         this.breadcrumbManager.updateBreadcrumb(chunk.headingContext);
       }
     }
+    if (this.minimapManager) {
+      this.minimapManager.updateCurrentPosition(chunk.index);
+    }
     if (this.settings.showContext && this.contextBeforeEl && this.contextAfterEl) {
       const context = this.engine.getContext(this.settings.contextWords);
       this.contextBeforeEl.setText(context.before.join(" "));
@@ -2580,86 +2743,6 @@ var DashReaderView = class extends import_obsidian2.ItemView {
     this.dom.updateStyle("progressBar", "width", `${progress}%`);
     this.state.increment("wordsRead");
     this.updateStats();
-  }
-  /**
-   * Displays a word with heading or callout-based styling
-   *
-   * @param word - Word to display
-   * @param headingLevel - Heading level (1-6) or 0 for normal text/callouts
-   * @param showSeparator - Whether to show separator line before heading/callout
-   * @param calloutType - Callout type (note, abstract, info, etc.) if this is a callout
-   */
-  displayWordWithHeading(word, headingLevel, showSeparator = false, calloutType) {
-    const calloutIcons = {
-      note: "\u{1F4DD}",
-      abstract: "\u{1F4C4}",
-      info: "\u2139\uFE0F",
-      tip: "\u{1F4A1}",
-      success: "\u2705",
-      question: "\u2753",
-      warning: "\u26A0\uFE0F",
-      failure: "\u274C",
-      danger: "\u26A1",
-      bug: "\u{1F41B}",
-      example: "\u{1F4CB}",
-      quote: "\u{1F4AC}"
-    };
-    let fontSizeMultiplier = 1;
-    let fontWeight = "normal";
-    let iconPrefix = "";
-    if (calloutType) {
-      fontSizeMultiplier = 1.2;
-      fontWeight = "bold";
-      iconPrefix = calloutIcons[calloutType.toLowerCase()] || "\u{1F4CC}";
-    } else if (headingLevel > 0) {
-      const multipliers = [
-        0,
-        HEADING_MULTIPLIERS.h1,
-        HEADING_MULTIPLIERS.h2,
-        HEADING_MULTIPLIERS.h3,
-        HEADING_MULTIPLIERS.h4,
-        HEADING_MULTIPLIERS.h5,
-        HEADING_MULTIPLIERS.h6
-      ];
-      fontSizeMultiplier = multipliers[headingLevel] || 1;
-      fontWeight = "bold";
-    }
-    const adjustedFontSize = this.settings.fontSize * fontSizeMultiplier;
-    const processedWord = this.processWord(word);
-    this.wordEl.empty();
-    if (showSeparator) {
-      this.wordEl.createDiv({ cls: "dashreader-heading-separator" });
-    }
-    const wordContainer = this.wordEl.createDiv({ cls: "dashreader-word-with-heading" });
-    wordContainer.style.fontSize = `${adjustedFontSize}px`;
-    wordContainer.style.fontWeight = fontWeight;
-    if (iconPrefix) {
-      const iconSpan = wordContainer.createSpan({ text: iconPrefix });
-      iconSpan.style.marginRight = "8px";
-      iconSpan.style.opacity = "0.8";
-    }
-    wordContainer.innerHTML = processedWord;
-  }
-  /**
-   * Processes a word for display with center character highlighting
-   * Escapes HTML to prevent XSS attacks
-   *
-   * @param word - Word to process
-   * @returns HTML string with highlighted center character
-   */
-  processWord(word) {
-    const cleanWord = word.trim();
-    const center = Math.max(Math.floor(cleanWord.length / 2) - 1, 0);
-    let result = "";
-    for (let i = 0; i < cleanWord.length; i++) {
-      const escapedChar = escapeHtml(cleanWord[i]);
-      if (i === center) {
-        result += `<span class="${CSS_CLASSES.highlight}" style="color: ${this.settings.highlightColor}">${escapedChar}</span>`;
-      } else {
-        result += escapedChar;
-      }
-    }
-    return result;
   }
   /**
    * Called by engine when reading is complete
@@ -2725,14 +2808,6 @@ var DashReaderView = class extends import_obsidian2.ItemView {
       welcomeMsg.remove();
     }
     this.wordEl.empty();
-    let sourceInfo = "";
-    if (source == null ? void 0 : source.fileName) {
-      const escapedFileName = escapeHtml(source.fileName);
-      const lineInfo = source.lineNumber ? ` (line ${source.lineNumber})` : "";
-      sourceInfo = `<div class="dashreader-ready-source">
-        ${ICONS.file} ${escapedFileName}${lineInfo}
-      </div>`;
-    }
     const totalWords = this.engine.getTotalWords();
     const remainingWords = this.engine.getRemainingWords();
     const estimatedDuration = this.engine.getEstimatedDuration();
@@ -2740,7 +2815,14 @@ var DashReaderView = class extends import_obsidian2.ItemView {
     const fileInfo = (source == null ? void 0 : source.fileName) ? ` from ${source.fileName}` : "";
     const wordInfo = wordIndexFromCursor && wordIndexFromCursor > 0 ? `${remainingWords}/${totalWords} words` : `${totalWords} words`;
     this.dom.updateText("statsText", `${wordInfo} loaded${fileInfo} - ~${durationText} - Shift+Space to start`);
-    this.wordEl.innerHTML = createReadyMessage(remainingWords, totalWords, wordIndexFromCursor, durationText, sourceInfo);
+    this.wordDisplay.displayReadyMessage(
+      remainingWords,
+      totalWords,
+      wordIndexFromCursor,
+      durationText,
+      source == null ? void 0 : source.fileName,
+      source == null ? void 0 : source.lineNumber
+    );
     const allHeadings = this.engine.getHeadings();
     if (allHeadings.length > 0) {
       const startIndex = wordIndexFromCursor != null ? wordIndexFromCursor : 0;
@@ -2765,6 +2847,9 @@ var DashReaderView = class extends import_obsidian2.ItemView {
           this.breadcrumbManager.updateBreadcrumb(initialContext);
         }
       }
+    }
+    if (this.minimapManager) {
+      this.minimapManager.render();
     }
     if (this.settings.autoStart) {
       setTimeout(() => {
@@ -2813,18 +2898,14 @@ var DashReaderSettingTab = class extends import_obsidian3.PluginSettingTab {
     }));
     inputEl = setting.controlEl.createEl("input", {
       type: "text",
-      value: value.toString()
+      value: value.toString(),
+      cls: "dashreader-slider-input"
     });
-    inputEl.style.width = "50px";
-    inputEl.style.textAlign = "center";
-    inputEl.style.marginLeft = "10px";
-    inputEl.style.border = "1px solid var(--background-modifier-border)";
-    inputEl.style.borderRadius = "3px";
-    inputEl.style.padding = "2px 4px";
     if (unit) {
-      const unitLabel = setting.controlEl.createSpan({ text: unit });
-      unitLabel.style.marginLeft = "4px";
-      unitLabel.style.opacity = "0.7";
+      setting.controlEl.createSpan({
+        text: unit,
+        cls: "dashreader-slider-unit"
+      });
     }
     inputEl.addEventListener("change", async () => {
       let newValue = parseFloat(inputEl.value);
@@ -2956,6 +3037,15 @@ var DashReaderSettingTab = class extends import_obsidian3.PluginSettingTab {
         await this.plugin.saveSettings();
       }
     );
+    containerEl.createEl("h3", { text: "Navigation" });
+    new import_obsidian3.Setting(containerEl).setName("Show minimap").setDesc("Display vertical minimap with document structure and progress").addToggle((toggle) => toggle.setValue(this.plugin.settings.showMinimap).onChange(async (value) => {
+      this.plugin.settings.showMinimap = value;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian3.Setting(containerEl).setName("Show breadcrumb").setDesc("Display breadcrumb navigation at the top").addToggle((toggle) => toggle.setValue(this.plugin.settings.showBreadcrumb).onChange(async (value) => {
+      this.plugin.settings.showBreadcrumb = value;
+      await this.plugin.saveSettings();
+    }));
     containerEl.createEl("h3", { text: "Micropause" });
     new import_obsidian3.Setting(containerEl).setName("Enable micropause").setDesc("Automatic pauses based on punctuation and word length").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableMicropause).onChange(async (value) => {
       this.plugin.settings.enableMicropause = value;
@@ -3110,8 +3200,10 @@ var DEFAULT_SETTINGS = {
   backgroundColor: "#1e1e1e",
   fontColor: "#ffffff",
   fontFamily: "inherit",
-  showContext: true,
+  showContext: false,
   contextWords: 3,
+  showMinimap: true,
+  showBreadcrumb: true,
   enableMicropause: true,
   micropausePunctuation: 2.5,
   // Sentence-ending punctuation (.,!?) - Stutter-inspired
@@ -3154,7 +3246,6 @@ var DashReaderPlugin = class extends import_obsidian4.Plugin {
     this.view = null;
   }
   async onload() {
-    console.log("Loading DashReader plugin");
     await this.loadSettings();
     this.registerView(
       VIEW_TYPE_DASHREADER,
@@ -3237,10 +3328,8 @@ var DashReaderPlugin = class extends import_obsidian4.Plugin {
         }
       })
     );
-    console.log("DashReader plugin loaded successfully");
   }
   onunload() {
-    console.log("Unloading DashReader plugin");
   }
   async loadSettings() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());

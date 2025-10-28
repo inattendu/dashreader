@@ -8,6 +8,8 @@ export interface DashReaderSettings {
   fontFamily: string;
   showContext: boolean;
   contextWords: number;
+  showMinimap: boolean;
+  showBreadcrumb: boolean;
   enableMicropause: boolean;
   micropausePunctuation: number;
   micropauseOtherPunctuation: number;
@@ -41,8 +43,10 @@ export const DEFAULT_SETTINGS: DashReaderSettings = {
   backgroundColor: '#1e1e1e',
   fontColor: '#ffffff',
   fontFamily: 'inherit',
-  showContext: true,
+  showContext: false,
   contextWords: 3,
+  showMinimap: true,
+  showBreadcrumb: true,
   enableMicropause: true,
   micropausePunctuation: 2.5, // Sentence-ending punctuation (.,!?) - Stutter-inspired
   micropauseOtherPunctuation: 1.5, // Other punctuation (;:,) - lighter pause

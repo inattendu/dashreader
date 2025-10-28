@@ -29,7 +29,6 @@
  *
  * **Update Methods**:
  * - updateText() - Change text content safely (no XSS risk)
- * - updateHTML() - Change HTML content (use with caution, escape first)
  * - updateStyle() - Modify CSS properties
  * - toggleClass() - Show/hide elements, change appearance
  * - Batch methods: updateMultipleText(), toggleMultipleVisibility()
@@ -54,7 +53,6 @@
  *    ├─ has() - Check if element is registered
  *    ├─ clear() - Clear all registrations
  *    ├─ updateText() - Update text content
- *    ├─ updateHTML() - Update HTML content (use with caution)
  *    ├─ updateStyle() - Update CSS property
  *    ├─ toggleClass() - Toggle CSS class
  *    ├─ addClass() - Add CSS class
@@ -193,32 +191,27 @@ export class DOMRegistry {
   }
 
   /**
-   * Update HTML content of a registered element
+   * @deprecated REMOVED for Obsidian security compliance.
    *
-   * **⚠️ WARNING**: Use with caution! Ensure content is properly escaped to
-   * prevent XSS attacks. Prefer updateText() for plain text content.
+   * Using innerHTML with any content is discouraged by Obsidian plugin guidelines.
+   * Instead, use DOM API methods to build HTML structures:
+   * - element.createEl(), element.createSpan(), element.createDiv()
+   * - element.setText() for text content (automatically escapes)
+   * - element.empty() to clear contents
    *
-   * Only use this when you need to render HTML markup (e.g., syntax highlighting,
-   * formatted text with spans, etc.) and you're certain the content is safe.
+   * See: https://docs.obsidian.md/Plugins/Releasing/Plugin+guidelines
    *
-   * @param key - Key of the element to update
-   * @param html - HTML string to set (MUST be escaped if user-generated)
-   *
-   * @example
+   * Migration example:
    * ```typescript
-   * // Safe: Generated HTML with no user input
-   * this.dom.updateHTML('wordEl', `<span class="highlight">Word</span>`);
+   * // OLD (unsafe):
+   * this.dom.updateHTML('wordEl', `<span class="highlight">${word}</span>`);
    *
-   * // UNSAFE: Never do this with user content
-   * // this.dom.updateHTML('wordEl', userInput); // ❌ XSS risk!
+   * // NEW (safe):
+   * const element = this.dom.get('wordEl');
+   * element.empty();
+   * element.createSpan({ text: word, cls: 'highlight' });
    * ```
    */
-  updateHTML(key: DOMElementKey, html: string): void {
-    const element = this.elements.get(key);
-    if (element) {
-      element.innerHTML = html;
-    }
-  }
 
   /**
    * Update a CSS style property of a registered element

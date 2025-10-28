@@ -11,7 +11,6 @@
 
 import { DashReaderSettings } from './types';
 import { HEADING_MULTIPLIERS } from './constants';
-import { escapeHtml } from './ui-builders';
 
 export class WordDisplay {
   private wordEl: HTMLElement;
@@ -85,7 +84,6 @@ export class WordDisplay {
     }
 
     const adjustedFontSize = this.settings.fontSize * fontSizeMultiplier;
-    const processedWord = this.processWord(word);
 
     // Clear and rebuild using DOM API (not innerHTML)
     this.wordEl.empty();
@@ -102,33 +100,32 @@ export class WordDisplay {
 
     // Add icon prefix if callout
     if (iconPrefix) {
-      const iconSpan = wordContainer.createSpan({ text: iconPrefix });
-      iconSpan.style.marginRight = '8px';
-      iconSpan.style.opacity = '0.8';
+      wordContainer.createSpan({
+        text: iconPrefix,
+        cls: 'dashreader-callout-icon'
+      });
     }
 
-    // Add processed word (may contain HTML for highlighting)
-    wordContainer.innerHTML = processedWord;
+    // Add processed word using DOM API (not innerHTML for security)
+    this.addProcessedWord(wordContainer, word);
   }
 
   /**
-   * Processes a word for display with center character highlighting
-   * Escapes HTML to prevent XSS attacks
+   * Adds a processed word to the container using DOM API
+   * This prevents XSS attacks by never using innerHTML with user content
    *
+   * @param container - Container element to add word to
    * @param rawWord - Raw word (may contain special characters)
-   * @returns HTML string with highlighted center character
    */
-  private processWord(rawWord: string): string {
+  private addProcessedWord(container: HTMLElement, rawWord: string): void {
     // Special case: line breaks (don't highlight, just display)
     if (rawWord === '\n') {
-      return '<br/>';
+      container.createEl('br');
+      return;
     }
 
     // Remove heading and callout markers (already processed by engine)
-    let word = rawWord.replace(/^\[H\d\]/, '').replace(/^\[CALLOUT:[\w-]+\]/, '');
-
-    // Escape HTML to prevent XSS
-    word = escapeHtml(word);
+    const word = rawWord.replace(/^\[H\d\]/, '').replace(/^\[CALLOUT:[\w-]+\]/, '');
 
     // Apply center character highlighting (always enabled)
     if (word.length > 0) {
@@ -137,19 +134,95 @@ export class WordDisplay {
       const center = word.charAt(centerIndex);
       const after = word.substring(centerIndex + 1);
 
-      return `${before}<span class="dashreader-highlight">${center}</span>${after}`;
+      // Build using DOM API to prevent XSS
+      if (before) {
+        container.createSpan({ text: before });
+      }
+      container.createSpan({
+        text: center,
+        cls: 'dashreader-highlight'
+      });
+      if (after) {
+        container.createSpan({ text: after });
+      }
+    } else {
+      // Empty word, just add as text
+      container.setText(word);
     }
-
-    return word;
   }
 
   /**
    * Displays a welcome message (no text loaded)
+   * Uses DOM API to build the message instead of innerHTML
    *
-   * @param message - HTML message to display
+   * @param icon - Icon to display
+   * @param mainText - Main message text
+   * @param subText - Instruction text
    */
-  displayMessage(message: string): void {
-    this.wordEl.innerHTML = message;
+  displayWelcomeMessage(icon: string, mainText: string, subText: string): void {
+    this.wordEl.empty();
+    const welcomeDiv = this.wordEl.createDiv({ cls: 'dashreader-welcome-message' });
+    welcomeDiv.createDiv({
+      text: `${icon} ${mainText}`,
+      cls: 'dashreader-welcome-icon'
+    });
+    welcomeDiv.createDiv({
+      text: subText,
+      cls: 'dashreader-welcome-instruction'
+    });
+  }
+
+  /**
+   * Displays a ready message (text loaded, ready to start)
+   * Uses DOM API to build the message instead of innerHTML
+   *
+   * @param wordsToRead - Number of words to read
+   * @param totalWords - Total words in document
+   * @param startIndex - Starting word index (if resuming)
+   * @param durationText - Formatted estimated duration
+   * @param fileName - Optional source file name
+   * @param lineNumber - Optional source line number
+   */
+  displayReadyMessage(
+    wordsToRead: number,
+    totalWords: number,
+    startIndex: number | undefined,
+    durationText: string,
+    fileName?: string,
+    lineNumber?: number
+  ): void {
+    this.wordEl.empty();
+    const readyDiv = this.wordEl.createDiv({ cls: 'dashreader-ready-message' });
+
+    // Add source info if provided
+    if (fileName) {
+      const sourceDiv = readyDiv.createDiv({ cls: 'dashreader-ready-source' });
+      sourceDiv.createSpan({ text: '📄 ' });
+      sourceDiv.createSpan({ text: fileName });
+      if (lineNumber) {
+        sourceDiv.createSpan({ text: ` (line ${lineNumber})` });
+      }
+    }
+
+    // Build main message
+    const mainText = readyDiv.createSpan();
+    mainText.createSpan({ text: `Ready to read ${wordsToRead} words` });
+
+    if (startIndex !== undefined && startIndex > 0) {
+      const startInfo = mainText.createSpan({ cls: 'dashreader-ready-start-info' });
+      startInfo.setText(` (starting at word ${startIndex + 1}/${totalWords})`);
+    }
+
+    readyDiv.createEl('br');
+    readyDiv.createSpan({
+      text: `Estimated time: ~${durationText}`,
+      cls: 'dashreader-ready-duration'
+    });
+    readyDiv.createEl('br');
+    readyDiv.createSpan({
+      text: 'Press Shift+Space to start',
+      cls: 'dashreader-ready-duration'
+    });
   }
 
   /**

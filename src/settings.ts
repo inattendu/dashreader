@@ -36,20 +36,16 @@ export class DashReaderSettingTab extends PluginSettingTab {
     // Add editable input
     inputEl = setting.controlEl.createEl('input', {
       type: 'text',
-      value: value.toString()
+      value: value.toString(),
+      cls: 'dashreader-slider-input'
     });
-    inputEl.style.width = '50px';
-    inputEl.style.textAlign = 'center';
-    inputEl.style.marginLeft = '10px';
-    inputEl.style.border = '1px solid var(--background-modifier-border)';
-    inputEl.style.borderRadius = '3px';
-    inputEl.style.padding = '2px 4px';
 
     // Add unit label if provided
     if (unit) {
-      const unitLabel = setting.controlEl.createSpan({ text: unit });
-      unitLabel.style.marginLeft = '4px';
-      unitLabel.style.opacity = '0.7';
+      setting.controlEl.createSpan({
+        text: unit,
+        cls: 'dashreader-slider-unit'
+      });
     }
 
     // Update slider when input changes
@@ -255,6 +251,29 @@ export class DashReaderSettingTab extends PluginSettingTab {
         await this.plugin.saveSettings();
       }
     );
+
+    // === Navigation Display ===
+    containerEl.createEl('h3', { text: 'Navigation' });
+
+    new Setting(containerEl)
+      .setName('Show minimap')
+      .setDesc('Display vertical minimap with document structure and progress')
+      .addToggle(toggle => toggle
+        .setValue(this.plugin.settings.showMinimap)
+        .onChange(async (value) => {
+          this.plugin.settings.showMinimap = value;
+          await this.plugin.saveSettings();
+        }));
+
+    new Setting(containerEl)
+      .setName('Show breadcrumb')
+      .setDesc('Display breadcrumb navigation at the top')
+      .addToggle(toggle => toggle
+        .setValue(this.plugin.settings.showBreadcrumb)
+        .onChange(async (value) => {
+          this.plugin.settings.showBreadcrumb = value;
+          await this.plugin.saveSettings();
+        }));
 
     // Section: Micropause
     containerEl.createEl('h3', { text: 'Micropause' });

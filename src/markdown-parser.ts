@@ -12,7 +12,7 @@ export class MarkdownParser {
     // 2. Protéger le contenu des blocs de code avec des marqueurs temporaires
     // Cela empêche les commentaires # dans le code d'être traités comme des headings
     const codeBlocks: string[] = [];
-    text = text.replace(/```[\w-]*\n?([\s\S]*?)```/g, (match, code) => {
+    text = text.replace(/```[\w-]*\n?([\s\S]*?)```/g, (_match, code) => {
       const index = codeBlocks.length;
       codeBlocks.push(code);
       return `___CODE_BLOCK_${index}___`;
@@ -28,7 +28,7 @@ export class MarkdownParser {
     text = text.replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1');
 
     // 6. Enlever les wikilinks [[lien]] ou [[lien|alias]] -> garder alias ou lien
-    text = text.replace(/\[\[([^\]|]+)(\|([^\]]+))?\]\]/g, (match, link, pipe, alias) => {
+    text = text.replace(/\[\[([^\]|]+)(\|([^\]]+))?\]\]/g, (_match, link, _pipe, alias) => {
       return alias || link;
     });
 
@@ -47,7 +47,7 @@ export class MarkdownParser {
 
     // 10. Marquer les headings avec leur niveau (#, ##, etc.)
     // # Titre → [H1]Titre, ## Titre → [H2]Titre, etc. (sans espace après le marqueur)
-    text = text.replace(/^(#{1,6})\s+(.+)$/gm, (match, hashes, content) => {
+    text = text.replace(/^(#{1,6})\s+(.+)$/gm, (_match, hashes, content) => {
       const level = hashes.length;
       return `[H${level}]${content}`;
     });
@@ -55,7 +55,7 @@ export class MarkdownParser {
     // 11. Marquer les callouts Obsidian comme pseudo-headings
     // > [!type] Titre → [CALLOUT:type]Titre
     // Garde le contenu des lignes suivantes (gérées par l'étape suivante)
-    text = text.replace(/^>\s*\[!([\w-]+)\]\s*(.*)$/gm, (match, type, title) => {
+    text = text.replace(/^>\s*\[!([\w-]+)\]\s*(.*)$/gm, (_match, type, title) => {
       // Si pas de titre, utiliser le type comme titre
       const displayTitle = title.trim() || type;
       return `[CALLOUT:${type}]${displayTitle}`;
@@ -98,7 +98,7 @@ export class MarkdownParser {
     text = text.replace(/[ \t]+$/gm, '');
 
     // 23. Restaurer le contenu des blocs de code
-    text = text.replace(/___CODE_BLOCK_(\d+)___/g, (match, index) => {
+    text = text.replace(/___CODE_BLOCK_(\d+)___/g, (_match, index) => {
       return codeBlocks[parseInt(index)] || '';
     });
 
