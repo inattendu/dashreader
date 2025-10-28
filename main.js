@@ -886,8 +886,8 @@ var INCREMENTS = {
 var LIMITS = {
   /** Font size range in pixels (20 = readable minimum, 120 = fills viewport) */
   fontSize: { min: 20, max: 120 },
-  /** WPM range (50 = very slow, 1000 = speed reading limit) */
-  wpm: { min: 50, max: 1e3 },
+  /** WPM range (50 = very slow, 5000 = ultra-fast speed reading limit) */
+  wpm: { min: 50, max: 5e3 },
   /** Acceleration duration in seconds (10 = quick ramp, 120 = gradual) */
   accelDuration: { min: 10, max: 120 }
 };

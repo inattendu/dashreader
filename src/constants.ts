@@ -196,7 +196,7 @@ export const INCREMENTS = {
  * Range limits for settings validation
  *
  * Prevents users from setting values that would cause poor UX:
- * - Too fast WPM (>1000) = unreadable
+ * - Too fast WPM (>5000) = beyond human capability
  * - Too slow WPM (<50) = frustrating
  * - Font size must fit viewport
  * - Acceleration duration must be practical
@@ -204,8 +204,8 @@ export const INCREMENTS = {
 export const LIMITS = {
   /** Font size range in pixels (20 = readable minimum, 120 = fills viewport) */
   fontSize: { min: 20, max: 120 },
-  /** WPM range (50 = very slow, 1000 = speed reading limit) */
-  wpm: { min: 50, max: 1000 },
+  /** WPM range (50 = very slow, 5000 = ultra-fast speed reading limit) */
+  wpm: { min: 50, max: 5000 },
   /** Acceleration duration in seconds (10 = quick ramp, 120 = gradual) */
   accelDuration: { min: 10, max: 120 },
 } as const;
