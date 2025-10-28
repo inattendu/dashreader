@@ -903,6 +903,120 @@ export class DashReaderView extends ItemView {
   // ============================================================================
 
   /**
+   * Parses markdown and calculates start position from cursor
+   *
+   * @param text - Raw markdown text
+   * @param cursorPosition - Optional cursor position in raw text
+   * @returns Object with plainText and wordIndex
+   */
+  private parseAndCalculateStartPosition(
+    text: string,
+    cursorPosition?: number
+  ): { plainText: string; wordIndex?: number } {
+    // Parse markdown FIRST (remove syntax, keep content)
+    const plainText = MarkdownParser.parseToPlainText(text);
+
+    // Calculate word index from cursor position
+    let wordIndex: number | undefined;
+    if (cursorPosition !== undefined) {
+      // Parse text up to cursor position
+      const textUpToCursor = text.substring(0, cursorPosition);
+      const parsedUpToCursor = MarkdownParser.parseToPlainText(textUpToCursor);
+
+      // Count words in parsed text (not raw markdown)
+      const wordsBeforeCursor = parsedUpToCursor.trim().split(/\s+/).filter(w => w.length > 0);
+      wordIndex = wordsBeforeCursor.length;
+    }
+
+    return { plainText, wordIndex };
+  }
+
+  /**
+   * Updates stats display and word display with ready message
+   *
+   * @param wordIndex - Starting word index (if resuming from cursor)
+   * @param source - Optional source information (filename, line number)
+   */
+  private updateStatsDisplay(
+    wordIndex: number | undefined,
+    source?: { fileName?: string; lineNumber?: number }
+  ): void {
+    // Calculate stats
+    const totalWords = this.engine.getTotalWords();
+    const remainingWords = this.engine.getRemainingWords();
+    const estimatedDuration = this.engine.getEstimatedDuration();
+    const durationText = formatTime(estimatedDuration);
+
+    // Update stats text in footer
+    const fileInfo = source?.fileName ? ` from ${source.fileName}` : '';
+    const wordInfo = wordIndex && wordIndex > 0
+      ? `${remainingWords}/${totalWords} words`
+      : `${totalWords} words`;
+    this.dom.updateText('statsText', `${wordInfo} loaded${fileInfo} - ~${durationText} - Shift+Space to start`);
+
+    // Display ready message in main word area
+    this.wordDisplay.displayReadyMessage(
+      remainingWords,
+      totalWords,
+      wordIndex,
+      durationText,
+      source?.fileName,
+      source?.lineNumber
+    );
+  }
+
+  /**
+   * Builds and displays initial breadcrumb based on starting position
+   *
+   * @param wordIndex - Starting word index (0 if starting from beginning)
+   */
+  private buildInitialBreadcrumb(wordIndex: number): void {
+    const allHeadings = this.engine.getHeadings();
+    if (allHeadings.length === 0) return;
+
+    // Get headings up to starting position
+    const relevantHeadings = allHeadings.filter(h => h.wordIndex <= wordIndex);
+    if (relevantHeadings.length === 0) return;
+
+    // Build hierarchical breadcrumb path
+    const breadcrumb: HeadingInfo[] = [];
+    let currentLevel = 0;
+
+    for (const heading of relevantHeadings) {
+      if (heading.level <= currentLevel) {
+        // Pop headings of equal or higher level
+        while (breadcrumb.length > 0 && breadcrumb[breadcrumb.length - 1].level >= heading.level) {
+          breadcrumb.pop();
+        }
+      }
+      breadcrumb.push(heading);
+      currentLevel = heading.level;
+    }
+
+    // Create context and update breadcrumb manager
+    const initialContext: HeadingContext = {
+      breadcrumb,
+      current: breadcrumb[breadcrumb.length - 1] || null
+    };
+
+    this.breadcrumbManager.updateBreadcrumb(initialContext);
+  }
+
+  /**
+   * Handles auto-start functionality if enabled in settings
+   * Starts reading after the configured delay
+   */
+  private handleAutoStart(): void {
+    if (!this.settings.autoStart) return;
+
+    this.timeoutManager.setTimeout(() => {
+      this.engine.play();
+      updatePlayPauseButtons(this.dom, true);
+      this.state.set('startTime', Date.now());
+    }, this.settings.autoStartDelay * 1000);
+  }
+
+  /**
    * Loads text for reading
    *
    * Process:
@@ -927,20 +1041,11 @@ export class DashReaderView extends ItemView {
     // Reset breadcrumb context for new text
     this.breadcrumbManager.reset();
 
-    // Parse markdown FIRST (remove syntax, keep content)
-    const plainText = MarkdownParser.parseToPlainText(text);
-
-    // Calculate word index from cursor position
-    let wordIndexFromCursor: number | undefined;
-    if (source?.cursorPosition !== undefined) {
-      // Parse text up to cursor position
-      const textUpToCursor = text.substring(0, source.cursorPosition);
-      const parsedUpToCursor = MarkdownParser.parseToPlainText(textUpToCursor);
-
-      // Count words in parsed text (not raw markdown)
-      const wordsBeforeCursor = parsedUpToCursor.trim().split(/\s+/).filter(w => w.length > 0);
-      wordIndexFromCursor = wordsBeforeCursor.length;
-    }
+    // Parse markdown and calculate start position
+    const { plainText, wordIndex: wordIndexFromCursor } = this.parseAndCalculateStartPosition(
+      text,
+      source?.cursorPosition
+    );
 
     // Verify text length
     if (!plainText || plainText.trim().length < TEXT_LIMITS.minParsedLength) {
@@ -959,75 +1064,17 @@ export class DashReaderView extends ItemView {
 
     this.wordEl.empty();
 
-    // Calculate stats
-    const totalWords = this.engine.getTotalWords();
-    const remainingWords = this.engine.getRemainingWords();
-    const estimatedDuration = this.engine.getEstimatedDuration();
-    const durationText = formatTime(estimatedDuration);
+    // Update stats and display ready message
+    this.updateStatsDisplay(wordIndexFromCursor, source);
 
-    // Update stats display
-    const fileInfo = source?.fileName ? ` from ${source.fileName}` : '';
-    const wordInfo = wordIndexFromCursor && wordIndexFromCursor > 0
-      ? `${remainingWords}/${totalWords} words`
-      : `${totalWords} words`;
-    this.dom.updateText('statsText', `${wordInfo} loaded${fileInfo} - ~${durationText} - Shift+Space to start`);
-
-    // Display ready message using DOM API (not innerHTML for security)
-    this.wordDisplay.displayReadyMessage(
-      remainingWords,
-      totalWords,
-      wordIndexFromCursor,
-      durationText,
-      source?.fileName,
-      source?.lineNumber
-    );
-
-    // Display initial breadcrumb (before starting reading)
-    const allHeadings = this.engine.getHeadings();
-    if (allHeadings.length > 0) {
-      // Get the initial heading context based on starting position
-      const startIndex = wordIndexFromCursor ?? 0;
-      const relevantHeadings = allHeadings.filter(h => h.wordIndex <= startIndex);
-
-      if (relevantHeadings.length > 0) {
-        // Build hierarchical breadcrumb
-        const breadcrumb: HeadingInfo[] = [];
-        let currentLevel = 0;
-
-        for (const heading of relevantHeadings) {
-          if (heading.level <= currentLevel) {
-            while (breadcrumb.length > 0 && breadcrumb[breadcrumb.length - 1].level >= heading.level) {
-              breadcrumb.pop();
-            }
-          }
-          breadcrumb.push(heading);
-          currentLevel = heading.level;
-        }
-
-        const initialContext: HeadingContext = {
-          breadcrumb,
-          current: breadcrumb[breadcrumb.length - 1] || null
-        };
-
-        if (this.breadcrumbManager) {
-          this.breadcrumbManager.updateBreadcrumb(initialContext);
-        }
-      }
-    }
+    // Build and display initial breadcrumb
+    this.buildInitialBreadcrumb(wordIndexFromCursor ?? 0);
 
     // Render minimap with headings
-    if (this.minimapManager) {
-      this.minimapManager.render();
-    }
+    this.minimapManager.render();
 
-    // Auto-start if enabled
-    if (this.settings.autoStart) {
-      this.timeoutManager.setTimeout(() => {
-        this.engine.play();
-        updatePlayPauseButtons(this.dom, true);
-        this.state.set('startTime', Date.now());
-      }, this.settings.autoStartDelay * 1000);
-    }
+    // Auto-start reading if enabled
+    this.handleAutoStart();
   }
 
   // ============================================================================

@@ -2897,6 +2897,89 @@ var DashReaderView = class extends import_obsidian2.ItemView {
   // SECTION 8: TEXT LOADING
   // ============================================================================
   /**
+   * Parses markdown and calculates start position from cursor
+   *
+   * @param text - Raw markdown text
+   * @param cursorPosition - Optional cursor position in raw text
+   * @returns Object with plainText and wordIndex
+   */
+  parseAndCalculateStartPosition(text, cursorPosition) {
+    const plainText = MarkdownParser.parseToPlainText(text);
+    let wordIndex;
+    if (cursorPosition !== void 0) {
+      const textUpToCursor = text.substring(0, cursorPosition);
+      const parsedUpToCursor = MarkdownParser.parseToPlainText(textUpToCursor);
+      const wordsBeforeCursor = parsedUpToCursor.trim().split(/\s+/).filter((w) => w.length > 0);
+      wordIndex = wordsBeforeCursor.length;
+    }
+    return { plainText, wordIndex };
+  }
+  /**
+   * Updates stats display and word display with ready message
+   *
+   * @param wordIndex - Starting word index (if resuming from cursor)
+   * @param source - Optional source information (filename, line number)
+   */
+  updateStatsDisplay(wordIndex, source) {
+    const totalWords = this.engine.getTotalWords();
+    const remainingWords = this.engine.getRemainingWords();
+    const estimatedDuration = this.engine.getEstimatedDuration();
+    const durationText = formatTime(estimatedDuration);
+    const fileInfo = (source == null ? void 0 : source.fileName) ? ` from ${source.fileName}` : "";
+    const wordInfo = wordIndex && wordIndex > 0 ? `${remainingWords}/${totalWords} words` : `${totalWords} words`;
+    this.dom.updateText("statsText", `${wordInfo} loaded${fileInfo} - ~${durationText} - Shift+Space to start`);
+    this.wordDisplay.displayReadyMessage(
+      remainingWords,
+      totalWords,
+      wordIndex,
+      durationText,
+      source == null ? void 0 : source.fileName,
+      source == null ? void 0 : source.lineNumber
+    );
+  }
+  /**
+   * Builds and displays initial breadcrumb based on starting position
+   *
+   * @param wordIndex - Starting word index (0 if starting from beginning)
+   */
+  buildInitialBreadcrumb(wordIndex) {
+    const allHeadings = this.engine.getHeadings();
+    if (allHeadings.length === 0)
+      return;
+    const relevantHeadings = allHeadings.filter((h) => h.wordIndex <= wordIndex);
+    if (relevantHeadings.length === 0)
+      return;
+    const breadcrumb = [];
+    let currentLevel = 0;
+    for (const heading of relevantHeadings) {
+      if (heading.level <= currentLevel) {
+        while (breadcrumb.length > 0 && breadcrumb[breadcrumb.length - 1].level >= heading.level) {
+          breadcrumb.pop();
+        }
+      }
+      breadcrumb.push(heading);
+      currentLevel = heading.level;
+    }
+    const initialContext = {
+      breadcrumb,
+      current: breadcrumb[breadcrumb.length - 1] || null
+    };
+    this.breadcrumbManager.updateBreadcrumb(initialContext);
+  }
+  /**
+   * Handles auto-start functionality if enabled in settings
+   * Starts reading after the configured delay
+   */
+  handleAutoStart() {
+    if (!this.settings.autoStart)
+      return;
+    this.timeoutManager.setTimeout(() => {
+      this.engine.play();
+      updatePlayPauseButtons(this.dom, true);
+      this.state.set("startTime", Date.now());
+    }, this.settings.autoStartDelay * 1e3);
+  }
+  /**
    * Loads text for reading
    *
    * Process:
@@ -2917,14 +3000,10 @@ var DashReaderView = class extends import_obsidian2.ItemView {
       updatePlayPauseButtons(this.dom, false);
     }
     this.breadcrumbManager.reset();
-    const plainText = MarkdownParser.parseToPlainText(text);
-    let wordIndexFromCursor;
-    if ((source == null ? void 0 : source.cursorPosition) !== void 0) {
-      const textUpToCursor = text.substring(0, source.cursorPosition);
-      const parsedUpToCursor = MarkdownParser.parseToPlainText(textUpToCursor);
-      const wordsBeforeCursor = parsedUpToCursor.trim().split(/\s+/).filter((w) => w.length > 0);
-      wordIndexFromCursor = wordsBeforeCursor.length;
-    }
+    const { plainText, wordIndex: wordIndexFromCursor } = this.parseAndCalculateStartPosition(
+      text,
+      source == null ? void 0 : source.cursorPosition
+    );
     if (!plainText || plainText.trim().length < TEXT_LIMITS.minParsedLength) {
       return;
     }
@@ -2935,56 +3014,10 @@ var DashReaderView = class extends import_obsidian2.ItemView {
       welcomeMsg.remove();
     }
     this.wordEl.empty();
-    const totalWords = this.engine.getTotalWords();
-    const remainingWords = this.engine.getRemainingWords();
-    const estimatedDuration = this.engine.getEstimatedDuration();
-    const durationText = formatTime(estimatedDuration);
-    const fileInfo = (source == null ? void 0 : source.fileName) ? ` from ${source.fileName}` : "";
-    const wordInfo = wordIndexFromCursor && wordIndexFromCursor > 0 ? `${remainingWords}/${totalWords} words` : `${totalWords} words`;
-    this.dom.updateText("statsText", `${wordInfo} loaded${fileInfo} - ~${durationText} - Shift+Space to start`);
-    this.wordDisplay.displayReadyMessage(
-      remainingWords,
-      totalWords,
-      wordIndexFromCursor,
-      durationText,
-      source == null ? void 0 : source.fileName,
-      source == null ? void 0 : source.lineNumber
-    );
-    const allHeadings = this.engine.getHeadings();
-    if (allHeadings.length > 0) {
-      const startIndex = wordIndexFromCursor != null ? wordIndexFromCursor : 0;
-      const relevantHeadings = allHeadings.filter((h) => h.wordIndex <= startIndex);
-      if (relevantHeadings.length > 0) {
-        const breadcrumb = [];
-        let currentLevel = 0;
-        for (const heading of relevantHeadings) {
-          if (heading.level <= currentLevel) {
-            while (breadcrumb.length > 0 && breadcrumb[breadcrumb.length - 1].level >= heading.level) {
-              breadcrumb.pop();
-            }
-          }
-          breadcrumb.push(heading);
-          currentLevel = heading.level;
-        }
-        const initialContext = {
-          breadcrumb,
-          current: breadcrumb[breadcrumb.length - 1] || null
-        };
-        if (this.breadcrumbManager) {
-          this.breadcrumbManager.updateBreadcrumb(initialContext);
-        }
-      }
-    }
-    if (this.minimapManager) {
-      this.minimapManager.render();
-    }
-    if (this.settings.autoStart) {
-      this.timeoutManager.setTimeout(() => {
-        this.engine.play();
-        updatePlayPauseButtons(this.dom, true);
-        this.state.set("startTime", Date.now());
-      }, this.settings.autoStartDelay * 1e3);
-    }
+    this.updateStatsDisplay(wordIndexFromCursor, source);
+    this.buildInitialBreadcrumb(wordIndexFromCursor != null ? wordIndexFromCursor : 0);
+    this.minimapManager.render();
+    this.handleAutoStart();
   }
   // ============================================================================
   // SECTION 9: SETTINGS & LIFECYCLE
