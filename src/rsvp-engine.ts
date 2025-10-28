@@ -1,5 +1,6 @@
 import { DashReaderSettings, WordChunk, HeadingInfo, HeadingContext } from './types';
 import { TimeoutManager } from './services/timeout-manager';
+import { MicropauseService } from './services/micropause-service';
 
 export class RSVPEngine {
   private words: string[] = [];
@@ -8,6 +9,7 @@ export class RSVPEngine {
   private timer: number | null = null;
   private settings: DashReaderSettings;
   private timeoutManager: TimeoutManager;
+  private micropauseService: MicropauseService;
   private onWordChange: (chunk: WordChunk) => void;
   private onComplete: () => void;
   private startTime: number = 0;
@@ -27,6 +29,7 @@ export class RSVPEngine {
     this.onWordChange = onWordChange;
     this.onComplete = onComplete;
     this.timeoutManager = timeoutManager;
+    this.micropauseService = new MicropauseService(settings);
   }
 
   setText(text: string, startPosition?: number, startWordIndex?: number): void {
@@ -213,65 +216,8 @@ export class RSVPEngine {
     const currentWpm = this.getCurrentWpm();
     const baseDelay = (60 / currentWpm) * 1000;
 
-    if (!this.settings.enableMicropause) {
-      return baseDelay;
-    }
-
-    let multiplier = 1.0;
-
-    // Détection des sections et énumérations (début de texte)
-    const trimmedText = text.trim();
-
-    // Micropause pour les headings Markdown [H1], [H2], etc.
-    const headingMatch = trimmedText.match(/^\[H(\d)\]/);
-    if (headingMatch) {
-      const level = parseInt(headingMatch[1]);
-      // Plus le niveau est bas (H1 = 1), plus la pause est longue
-      // H1 = 2.0x, H2 = 1.8x, H3 = 1.5x, H4 = 1.3x, H5 = 1.2x, H6 = 1.1x
-      const headingMultipliers = [0, 2.0, 1.8, 1.5, 1.3, 1.2, 1.1];
-      multiplier *= headingMultipliers[level] || 1.5;
-    }
-
-    // Micropause pour les callouts Obsidian [CALLOUT:type]
-    const calloutMatch = trimmedText.match(/^\[CALLOUT:[\w-]+\]/);
-    if (calloutMatch) {
-      multiplier *= this.settings.micropauseCallouts;
-    }
-
-    // Micropause pour numéros de section (1., 2., I., II., etc.)
-    if (/^(\d+\.|[IVXLCDM]+\.|\w\.)/.test(trimmedText)) {
-      multiplier *= this.settings.micropauseSectionMarkers;
-    }
-
-    // Micropause pour puces de liste (-, *, +, •)
-    if (/^[-*+•]/.test(trimmedText)) {
-      multiplier *= this.settings.micropauseListBullets;
-    }
-
-    // Micropause pour la ponctuation (fin de texte)
-    // Distinction: sentences (.,!?) vs other punctuation (:;,)
-    if (/[.!?]$/.test(text)) {
-      // Sentence-ending punctuation: full pause
-      multiplier *= this.settings.micropausePunctuation;
-    } else if (/[;:,]$/.test(text)) {
-      // Other punctuation: lighter pause
-      multiplier *= this.settings.micropauseOtherPunctuation;
-    }
-
-    // Micropause pour les nombres (dates, statistiques, années, etc.)
-    if (/\d/.test(text)) {
-      multiplier *= this.settings.micropauseNumbers;
-    }
-
-    // Micropause pour les mots longs (>8 caractères)
-    if (text.length > 8) {
-      multiplier *= this.settings.micropauseLongWords;
-    }
-
-    // Micropause pour les sauts de paragraphe
-    if (text.includes('\n')) {
-      multiplier *= this.settings.micropauseParagraph;
-    }
+    // Calculate micropause multiplier using service
+    const multiplier = this.micropauseService.calculateMultiplier(text);
 
     return baseDelay * multiplier;
   }
@@ -463,6 +409,7 @@ export class RSVPEngine {
 
   updateSettings(settings: DashReaderSettings): void {
     this.settings = settings;
+    this.micropauseService.updateSettings(settings);
   }
 
   getEstimatedDuration(): number {
@@ -492,64 +439,8 @@ export class RSVPEngine {
     for (let i = this.currentIndex; i < this.words.length; i++) {
       const word = this.words[i];
 
-      if (!this.settings.enableMicropause) {
-        // Sans micropause, juste le délai de base
-        totalTimeMs += baseDelay;
-        continue;
-      }
-
-      // Calculer le multiplicateur de micropause pour ce mot
-      let multiplier = 1.0;
-      const trimmedText = word.trim();
-
-      // Micropause pour les headings Markdown [H1], [H2], etc.
-      const headingMatch = trimmedText.match(/^\[H(\d)\]/);
-      if (headingMatch) {
-        const level = parseInt(headingMatch[1]);
-        const headingMultipliers = [0, 2.0, 1.8, 1.5, 1.3, 1.2, 1.1];
-        multiplier *= headingMultipliers[level] || 1.5;
-      }
-
-      // Micropause pour les callouts Obsidian [CALLOUT:type]
-      const calloutMatch = trimmedText.match(/^\[CALLOUT:[\w-]+\]/);
-      if (calloutMatch) {
-        multiplier *= this.settings.micropauseCallouts;
-      }
-
-      // Micropause pour numéros de section (1., 2., I., II., etc.)
-      if (/^(\d+\.|[IVXLCDM]+\.|\w\.)/.test(trimmedText)) {
-        multiplier *= this.settings.micropauseSectionMarkers;
-      }
-
-      // Micropause pour puces de liste (-, *, +, •)
-      if (/^[-*+•]/.test(trimmedText)) {
-        multiplier *= this.settings.micropauseListBullets;
-      }
-
-      // Micropause pour la ponctuation (fin de texte)
-      // Distinction: sentences (.,!?) vs other punctuation (:;,)
-      if (/[.!?]$/.test(word)) {
-        // Sentence-ending punctuation: full pause
-        multiplier *= this.settings.micropausePunctuation;
-      } else if (/[;:,]$/.test(word)) {
-        // Other punctuation: lighter pause
-        multiplier *= this.settings.micropauseOtherPunctuation;
-      }
-
-      // Micropause pour les nombres (dates, statistiques, années, etc.)
-      if (/\d/.test(word)) {
-        multiplier *= this.settings.micropauseNumbers;
-      }
-
-      // Micropause pour les mots longs (>8 caractères)
-      if (word.length > 8) {
-        multiplier *= this.settings.micropauseLongWords;
-      }
-
-      // Micropause pour les sauts de paragraphe
-      if (word.includes('\n')) {
-        multiplier *= this.settings.micropauseParagraph;
-      }
+      // Calculate micropause multiplier using service
+      const multiplier = this.micropauseService.calculateMultiplier(word);
 
       totalTimeMs += baseDelay * multiplier;
     }

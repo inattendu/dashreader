@@ -32,6 +32,150 @@ var import_obsidian4 = require("obsidian");
 // src/rsvp-view.ts
 var import_obsidian2 = require("obsidian");
 
+// src/services/micropause-service.ts
+var _HeadingStrategy = class {
+  getMultiplier(word) {
+    const trimmed = word.trim();
+    const match = trimmed.match(/^\[H(\d)\]/);
+    if (!match)
+      return 1;
+    const level = parseInt(match[1]);
+    return _HeadingStrategy.MULTIPLIERS[level] || 1.5;
+  }
+};
+var HeadingStrategy = _HeadingStrategy;
+HeadingStrategy.MULTIPLIERS = [0, 2, 1.8, 1.5, 1.3, 1.2, 1.1];
+var CalloutStrategy = class {
+  constructor(multiplier) {
+    this.multiplier = multiplier;
+  }
+  getMultiplier(word) {
+    const trimmed = word.trim();
+    return /^\[CALLOUT:[\w-]+\]/.test(trimmed) ? this.multiplier : 1;
+  }
+};
+var SectionMarkerStrategy = class {
+  constructor(multiplier) {
+    this.multiplier = multiplier;
+  }
+  getMultiplier(word) {
+    const trimmed = word.trim();
+    return /^(\d+\.|[IVXLCDM]+\.|\w\.)/.test(trimmed) ? this.multiplier : 1;
+  }
+};
+var ListBulletStrategy = class {
+  constructor(multiplier) {
+    this.multiplier = multiplier;
+  }
+  getMultiplier(word) {
+    const trimmed = word.trim();
+    return /^[-*+•]/.test(trimmed) ? this.multiplier : 1;
+  }
+};
+var SentencePunctuationStrategy = class {
+  constructor(multiplier) {
+    this.multiplier = multiplier;
+  }
+  getMultiplier(word) {
+    return /[.!?]$/.test(word) ? this.multiplier : 1;
+  }
+};
+var OtherPunctuationStrategy = class {
+  constructor(multiplier) {
+    this.multiplier = multiplier;
+  }
+  getMultiplier(word) {
+    return /[;:,]$/.test(word) ? this.multiplier : 1;
+  }
+};
+var NumberStrategy = class {
+  constructor(multiplier) {
+    this.multiplier = multiplier;
+  }
+  getMultiplier(word) {
+    return /\d/.test(word) ? this.multiplier : 1;
+  }
+};
+var LongWordStrategy = class {
+  constructor(multiplier) {
+    this.multiplier = multiplier;
+  }
+  getMultiplier(word) {
+    return word.length > 8 ? this.multiplier : 1;
+  }
+};
+var ParagraphBreakStrategy = class {
+  constructor(multiplier) {
+    this.multiplier = multiplier;
+  }
+  getMultiplier(word) {
+    return word.includes("\n") ? this.multiplier : 1;
+  }
+};
+var MicropauseService = class {
+  constructor(settings) {
+    this.enabled = settings.enableMicropause;
+    this.strategies = [
+      new HeadingStrategy(),
+      new CalloutStrategy(settings.micropauseCallouts),
+      new SectionMarkerStrategy(settings.micropauseSectionMarkers),
+      new ListBulletStrategy(settings.micropauseListBullets),
+      new SentencePunctuationStrategy(settings.micropausePunctuation),
+      new OtherPunctuationStrategy(settings.micropauseOtherPunctuation),
+      new NumberStrategy(settings.micropauseNumbers),
+      new LongWordStrategy(settings.micropauseLongWords),
+      new ParagraphBreakStrategy(settings.micropauseParagraph)
+    ];
+  }
+  /**
+   * Calculates the total multiplier for a word
+   * Applies all strategies and multiplies the results
+   *
+   * @param word - The word to analyze
+   * @returns Total multiplier (1.0 = no pause, >1.0 = longer pause)
+   *
+   * @example
+   * ```typescript
+   * const service = new MicropauseService(settings);
+   *
+   * service.calculateMultiplier("Hello");     // 1.0 (no special characteristics)
+   * service.calculateMultiplier("Hello!");    // 2.5 (sentence punctuation)
+   * service.calculateMultiplier("[H1]Title"); // 2.0 (heading)
+   * service.calculateMultiplier("Hello!\n");  // 6.25 (2.5 * 2.5 = punctuation * paragraph)
+   * ```
+   */
+  calculateMultiplier(word) {
+    if (!this.enabled)
+      return 1;
+    let totalMultiplier = 1;
+    for (const strategy of this.strategies) {
+      const strategyMultiplier = strategy.getMultiplier(word);
+      totalMultiplier *= strategyMultiplier;
+    }
+    return totalMultiplier;
+  }
+  /**
+   * Updates service with new settings
+   * Recreates strategies with updated multipliers
+   *
+   * @param settings - New settings
+   */
+  updateSettings(settings) {
+    this.enabled = settings.enableMicropause;
+    this.strategies = [
+      new HeadingStrategy(),
+      new CalloutStrategy(settings.micropauseCallouts),
+      new SectionMarkerStrategy(settings.micropauseSectionMarkers),
+      new ListBulletStrategy(settings.micropauseListBullets),
+      new SentencePunctuationStrategy(settings.micropausePunctuation),
+      new OtherPunctuationStrategy(settings.micropauseOtherPunctuation),
+      new NumberStrategy(settings.micropauseNumbers),
+      new LongWordStrategy(settings.micropauseLongWords),
+      new ParagraphBreakStrategy(settings.micropauseParagraph)
+    ];
+  }
+};
+
 // src/rsvp-engine.ts
 var RSVPEngine = class {
   constructor(settings, onWordChange, onComplete, timeoutManager) {
@@ -49,6 +193,7 @@ var RSVPEngine = class {
     this.onWordChange = onWordChange;
     this.onComplete = onComplete;
     this.timeoutManager = timeoutManager;
+    this.micropauseService = new MicropauseService(settings);
   }
   setText(text, startPosition, startWordIndex) {
     const cleaned = text.replace(/\n+/g, " \xA7\xA7LINEBREAK\xA7\xA7 ").replace(/[ \t]+/g, " ").trim();
@@ -185,41 +330,7 @@ var RSVPEngine = class {
   calculateDelay(text) {
     const currentWpm = this.getCurrentWpm();
     const baseDelay = 60 / currentWpm * 1e3;
-    if (!this.settings.enableMicropause) {
-      return baseDelay;
-    }
-    let multiplier = 1;
-    const trimmedText = text.trim();
-    const headingMatch = trimmedText.match(/^\[H(\d)\]/);
-    if (headingMatch) {
-      const level = parseInt(headingMatch[1]);
-      const headingMultipliers = [0, 2, 1.8, 1.5, 1.3, 1.2, 1.1];
-      multiplier *= headingMultipliers[level] || 1.5;
-    }
-    const calloutMatch = trimmedText.match(/^\[CALLOUT:[\w-]+\]/);
-    if (calloutMatch) {
-      multiplier *= this.settings.micropauseCallouts;
-    }
-    if (/^(\d+\.|[IVXLCDM]+\.|\w\.)/.test(trimmedText)) {
-      multiplier *= this.settings.micropauseSectionMarkers;
-    }
-    if (/^[-*+•]/.test(trimmedText)) {
-      multiplier *= this.settings.micropauseListBullets;
-    }
-    if (/[.!?]$/.test(text)) {
-      multiplier *= this.settings.micropausePunctuation;
-    } else if (/[;:,]$/.test(text)) {
-      multiplier *= this.settings.micropauseOtherPunctuation;
-    }
-    if (/\d/.test(text)) {
-      multiplier *= this.settings.micropauseNumbers;
-    }
-    if (text.length > 8) {
-      multiplier *= this.settings.micropauseLongWords;
-    }
-    if (text.includes("\n")) {
-      multiplier *= this.settings.micropauseParagraph;
-    }
+    const multiplier = this.micropauseService.calculateMultiplier(text);
     return baseDelay * multiplier;
   }
   /**
@@ -355,6 +466,7 @@ var RSVPEngine = class {
   }
   updateSettings(settings) {
     this.settings = settings;
+    this.micropauseService.updateSettings(settings);
   }
   getEstimatedDuration() {
     if (this.words.length === 0)
@@ -372,42 +484,7 @@ var RSVPEngine = class {
     const baseDelay = 60 / wpm * 1e3;
     for (let i = this.currentIndex; i < this.words.length; i++) {
       const word = this.words[i];
-      if (!this.settings.enableMicropause) {
-        totalTimeMs += baseDelay;
-        continue;
-      }
-      let multiplier = 1;
-      const trimmedText = word.trim();
-      const headingMatch = trimmedText.match(/^\[H(\d)\]/);
-      if (headingMatch) {
-        const level = parseInt(headingMatch[1]);
-        const headingMultipliers = [0, 2, 1.8, 1.5, 1.3, 1.2, 1.1];
-        multiplier *= headingMultipliers[level] || 1.5;
-      }
-      const calloutMatch = trimmedText.match(/^\[CALLOUT:[\w-]+\]/);
-      if (calloutMatch) {
-        multiplier *= this.settings.micropauseCallouts;
-      }
-      if (/^(\d+\.|[IVXLCDM]+\.|\w\.)/.test(trimmedText)) {
-        multiplier *= this.settings.micropauseSectionMarkers;
-      }
-      if (/^[-*+•]/.test(trimmedText)) {
-        multiplier *= this.settings.micropauseListBullets;
-      }
-      if (/[.!?]$/.test(word)) {
-        multiplier *= this.settings.micropausePunctuation;
-      } else if (/[;:,]$/.test(word)) {
-        multiplier *= this.settings.micropauseOtherPunctuation;
-      }
-      if (/\d/.test(word)) {
-        multiplier *= this.settings.micropauseNumbers;
-      }
-      if (word.length > 8) {
-        multiplier *= this.settings.micropauseLongWords;
-      }
-      if (word.includes("\n")) {
-        multiplier *= this.settings.micropauseParagraph;
-      }
+      const multiplier = this.micropauseService.calculateMultiplier(word);
       totalTimeMs += baseDelay * multiplier;
     }
     return Math.ceil(totalTimeMs / 1e3);
