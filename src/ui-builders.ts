@@ -46,7 +46,7 @@
 // ============================================================================
 
 import { CSS_CLASSES, ICONS } from './constants';
-import { DOMRegistry } from './dom-registry';
+import { DOMRegistry, DOMElementKey } from './dom-registry';
 
 // ──────────────────────────────────────────────────────────────────────
 // Button Configuration
@@ -85,7 +85,7 @@ export interface NumberControlConfig {
   /** Increment amount (for tooltip) */
   increment?: number;
   /** Key for DOM registry auto-update */
-  registryKey?: string;
+  registryKey?: DOMElementKey;
   /** Custom icon for decrement button */
   decrementIcon?: string;
   /** Custom icon for increment button */
@@ -146,7 +146,7 @@ export interface SliderConfig {
   /** Handler when value changes */
   onChange: (value: number) => void;
   /** Key for DOM registry auto-update */
-  registryKey?: string;
+  registryKey?: DOMElementKey;
   /** Whether to show value display (default: true) */
   showValue?: boolean;
   /** Unit to append to value (e.g., "px", "WPM") */
@@ -305,7 +305,7 @@ export function createNumberControl(
 
   // Register in DOM registry if key provided
   if (config.registryKey && registry) {
-    registry.register(config.registryKey as any, valueEl);
+    registry.register(config.registryKey, valueEl);
   }
 
   // Increment button
@@ -493,7 +493,7 @@ export function createSlider(
     });
 
     if (config.registryKey && registry) {
-      registry.register(config.registryKey as any, valueEl);
+      registry.register(config.registryKey, valueEl);
     }
   }
 

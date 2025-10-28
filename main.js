@@ -778,9 +778,7 @@ var ViewState = class {
    */
   toggle(key) {
     const currentValue = this.get(key);
-    if (typeof currentValue === "boolean") {
-      this.set(key, !currentValue);
-    }
+    this.set(key, !currentValue);
   }
   /**
    * Increment a numeric state value (helper)
@@ -805,9 +803,7 @@ var ViewState = class {
    */
   increment(key, delta = 1) {
     const currentValue = this.get(key);
-    if (typeof currentValue === "number") {
-      this.set(key, currentValue + delta);
-    }
+    this.set(key, currentValue + delta);
   }
 };
 
@@ -1044,7 +1040,7 @@ var DOMRegistry = class {
   updateStyle(key, property, value) {
     const element = this.elements.get(key);
     if (element) {
-      element.style[property] = value;
+      element.style.setProperty(property, value);
     }
   }
   /**

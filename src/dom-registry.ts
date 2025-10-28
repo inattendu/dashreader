@@ -77,7 +77,7 @@ import { CSS_CLASSES } from './constants';
  * Type-safe keys prevent typos and enable IDE autocomplete.
  * If you add a new element to register, add its key here.
  */
-type DOMElementKey =
+export type DOMElementKey =
   | 'wpmValue'          // WPM value display in controls
   | 'wpmInlineValue'    // WPM value in inline settings
   | 'wpmDisplay'        // WPM display in stats panel
@@ -233,7 +233,8 @@ export class DOMRegistry {
   updateStyle(key: DOMElementKey, property: string, value: string): void {
     const element = this.elements.get(key);
     if (element) {
-      (element.style as any)[property] = value;
+      // Use setProperty for type-safe dynamic CSS property access
+      element.style.setProperty(property, value);
     }
   }
 

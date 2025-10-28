@@ -381,11 +381,9 @@ export class ViewState {
    * state.toggle('showingSettings');
    * ```
    */
-  toggle(key: keyof Pick<ViewStateData, 'showingControls' | 'showingSettings' | 'showingStats' | 'isLoading'>): void {
-    const currentValue = this.get(key);
-    if (typeof currentValue === 'boolean') {
-      this.set(key, !currentValue as any);
-    }
+  toggle<K extends 'showingControls' | 'showingSettings' | 'showingStats' | 'isLoading'>(key: K): void {
+    const currentValue = this.get(key) as boolean;
+    this.set(key, !currentValue);
   }
 
   /**
@@ -409,10 +407,8 @@ export class ViewState {
    * state.increment('wordsRead', -1);
    * ```
    */
-  increment(key: keyof Pick<ViewStateData, 'wordsRead'>, delta: number = 1): void {
-    const currentValue = this.get(key);
-    if (typeof currentValue === 'number') {
-      this.set(key, (currentValue + delta) as any);
-    }
+  increment<K extends 'wordsRead'>(key: K, delta: number = 1): void {
+    const currentValue = this.get(key) as number;
+    this.set(key, currentValue + delta);
   }
 }
