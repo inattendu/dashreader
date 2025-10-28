@@ -3366,6 +3366,166 @@ var DEFAULT_SETTINGS = {
   // Increased from 450 (Stutter suggests 600-800)
 };
 
+// src/services/settings-validator.ts
+var LIMITS2 = {
+  wpm: { min: 50, max: 5e3 },
+  chunkSize: { min: 1, max: 10 },
+  fontSize: { min: 12, max: 120 },
+  contextWords: { min: 0, max: 20 },
+  autoStartDelay: { min: 0, max: 60 },
+  accelerationDuration: { min: 1, max: 300 },
+  accelerationTargetWpm: { min: 50, max: 5e3 },
+  micropauseMultiplier: { min: 1, max: 10 }
+};
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+function validateColor(color, defaultColor) {
+  if (typeof color !== "string")
+    return defaultColor;
+  if (/^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(color)) {
+    return color;
+  }
+  return defaultColor;
+}
+function validateNumber(value, defaultValue, min, max) {
+  if (typeof value !== "number" || isNaN(value)) {
+    return defaultValue;
+  }
+  return clamp(value, min, max);
+}
+function validateBoolean(value, defaultValue) {
+  if (typeof value === "boolean")
+    return value;
+  return defaultValue;
+}
+function validateString(value, defaultValue) {
+  if (typeof value === "string")
+    return value;
+  return defaultValue;
+}
+function validateSettings(partial) {
+  if (!partial || typeof partial !== "object") {
+    return { ...DEFAULT_SETTINGS };
+  }
+  return {
+    // Numeric settings with range validation
+    wpm: validateNumber(
+      partial.wpm,
+      DEFAULT_SETTINGS.wpm,
+      LIMITS2.wpm.min,
+      LIMITS2.wpm.max
+    ),
+    chunkSize: validateNumber(
+      partial.chunkSize,
+      DEFAULT_SETTINGS.chunkSize,
+      LIMITS2.chunkSize.min,
+      LIMITS2.chunkSize.max
+    ),
+    fontSize: validateNumber(
+      partial.fontSize,
+      DEFAULT_SETTINGS.fontSize,
+      LIMITS2.fontSize.min,
+      LIMITS2.fontSize.max
+    ),
+    contextWords: validateNumber(
+      partial.contextWords,
+      DEFAULT_SETTINGS.contextWords,
+      LIMITS2.contextWords.min,
+      LIMITS2.contextWords.max
+    ),
+    autoStartDelay: validateNumber(
+      partial.autoStartDelay,
+      DEFAULT_SETTINGS.autoStartDelay,
+      LIMITS2.autoStartDelay.min,
+      LIMITS2.autoStartDelay.max
+    ),
+    accelerationDuration: validateNumber(
+      partial.accelerationDuration,
+      DEFAULT_SETTINGS.accelerationDuration,
+      LIMITS2.accelerationDuration.min,
+      LIMITS2.accelerationDuration.max
+    ),
+    accelerationTargetWpm: validateNumber(
+      partial.accelerationTargetWpm,
+      DEFAULT_SETTINGS.accelerationTargetWpm,
+      LIMITS2.accelerationTargetWpm.min,
+      LIMITS2.accelerationTargetWpm.max
+    ),
+    // Micropause multipliers
+    micropausePunctuation: validateNumber(
+      partial.micropausePunctuation,
+      DEFAULT_SETTINGS.micropausePunctuation,
+      LIMITS2.micropauseMultiplier.min,
+      LIMITS2.micropauseMultiplier.max
+    ),
+    micropauseOtherPunctuation: validateNumber(
+      partial.micropauseOtherPunctuation,
+      DEFAULT_SETTINGS.micropauseOtherPunctuation,
+      LIMITS2.micropauseMultiplier.min,
+      LIMITS2.micropauseMultiplier.max
+    ),
+    micropauseLongWords: validateNumber(
+      partial.micropauseLongWords,
+      DEFAULT_SETTINGS.micropauseLongWords,
+      LIMITS2.micropauseMultiplier.min,
+      LIMITS2.micropauseMultiplier.max
+    ),
+    micropauseParagraph: validateNumber(
+      partial.micropauseParagraph,
+      DEFAULT_SETTINGS.micropauseParagraph,
+      LIMITS2.micropauseMultiplier.min,
+      LIMITS2.micropauseMultiplier.max
+    ),
+    micropauseNumbers: validateNumber(
+      partial.micropauseNumbers,
+      DEFAULT_SETTINGS.micropauseNumbers,
+      LIMITS2.micropauseMultiplier.min,
+      LIMITS2.micropauseMultiplier.max
+    ),
+    micropauseSectionMarkers: validateNumber(
+      partial.micropauseSectionMarkers,
+      DEFAULT_SETTINGS.micropauseSectionMarkers,
+      LIMITS2.micropauseMultiplier.min,
+      LIMITS2.micropauseMultiplier.max
+    ),
+    micropauseListBullets: validateNumber(
+      partial.micropauseListBullets,
+      DEFAULT_SETTINGS.micropauseListBullets,
+      LIMITS2.micropauseMultiplier.min,
+      LIMITS2.micropauseMultiplier.max
+    ),
+    micropauseCallouts: validateNumber(
+      partial.micropauseCallouts,
+      DEFAULT_SETTINGS.micropauseCallouts,
+      LIMITS2.micropauseMultiplier.min,
+      LIMITS2.micropauseMultiplier.max
+    ),
+    // Color settings
+    highlightColor: validateColor(partial.highlightColor, DEFAULT_SETTINGS.highlightColor),
+    backgroundColor: validateColor(partial.backgroundColor, DEFAULT_SETTINGS.backgroundColor),
+    fontColor: validateColor(partial.fontColor, DEFAULT_SETTINGS.fontColor),
+    // String settings
+    fontFamily: validateString(partial.fontFamily, DEFAULT_SETTINGS.fontFamily),
+    hotkeyPlay: validateString(partial.hotkeyPlay, DEFAULT_SETTINGS.hotkeyPlay),
+    hotkeyRewind: validateString(partial.hotkeyRewind, DEFAULT_SETTINGS.hotkeyRewind),
+    hotkeyForward: validateString(partial.hotkeyForward, DEFAULT_SETTINGS.hotkeyForward),
+    hotkeyIncrementWpm: validateString(partial.hotkeyIncrementWpm, DEFAULT_SETTINGS.hotkeyIncrementWpm),
+    hotkeyDecrementWpm: validateString(partial.hotkeyDecrementWpm, DEFAULT_SETTINGS.hotkeyDecrementWpm),
+    hotkeyQuit: validateString(partial.hotkeyQuit, DEFAULT_SETTINGS.hotkeyQuit),
+    // Boolean settings
+    showContext: validateBoolean(partial.showContext, DEFAULT_SETTINGS.showContext),
+    showMinimap: validateBoolean(partial.showMinimap, DEFAULT_SETTINGS.showMinimap),
+    showBreadcrumb: validateBoolean(partial.showBreadcrumb, DEFAULT_SETTINGS.showBreadcrumb),
+    enableMicropause: validateBoolean(partial.enableMicropause, DEFAULT_SETTINGS.enableMicropause),
+    autoStart: validateBoolean(partial.autoStart, DEFAULT_SETTINGS.autoStart),
+    showProgress: validateBoolean(partial.showProgress, DEFAULT_SETTINGS.showProgress),
+    showStats: validateBoolean(partial.showStats, DEFAULT_SETTINGS.showStats),
+    enableSlowStart: validateBoolean(partial.enableSlowStart, DEFAULT_SETTINGS.enableSlowStart),
+    enableAcceleration: validateBoolean(partial.enableAcceleration, DEFAULT_SETTINGS.enableAcceleration)
+  };
+}
+
 // main.ts
 var DashReaderPlugin = class extends import_obsidian4.Plugin {
   constructor() {
@@ -3459,7 +3619,8 @@ var DashReaderPlugin = class extends import_obsidian4.Plugin {
   onunload() {
   }
   async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    const rawSettings = await this.loadData();
+    this.settings = validateSettings(rawSettings);
   }
   async saveSettings() {
     await this.saveData(this.settings);

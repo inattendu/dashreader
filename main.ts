@@ -1,7 +1,8 @@
 import { Plugin, WorkspaceLeaf, Notice, MarkdownView, Menu, Editor } from 'obsidian';
 import { DashReaderView, VIEW_TYPE_DASHREADER } from './src/rsvp-view';
 import { DashReaderSettingTab } from './src/settings';
-import { DashReaderSettings, DEFAULT_SETTINGS } from './src/types';
+import { DashReaderSettings } from './src/types';
+import { validateSettings } from './src/services/settings-validator';
 
 export default class DashReaderPlugin extends Plugin {
   settings: DashReaderSettings;
@@ -119,7 +120,8 @@ export default class DashReaderPlugin extends Plugin {
   }
 
   async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    const rawSettings = await this.loadData();
+    this.settings = validateSettings(rawSettings);
   }
 
   async saveSettings() {
