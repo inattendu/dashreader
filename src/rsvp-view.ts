@@ -62,13 +62,13 @@ import { WordDisplay } from './word-display';
 import { HotkeyHandler } from './hotkey-handler';
 import { MinimapManager } from './minimap-manager';
 import { TimeoutManager } from './services/timeout-manager';
+import { StatsFormatter } from './services/stats-formatter';
 import {
   createButton,
   createNumberControl,
   createToggleControl,
   createPlayPauseButtons,
   updatePlayPauseButtons,
-  formatTime,
 } from './ui-builders';
 import {
   CSS_CLASSES,
@@ -128,6 +128,9 @@ export class DashReaderView extends ItemView {
 
   /** Timeout manager for preventing memory leaks */
   private timeoutManager: TimeoutManager;
+
+  /** Statistics formatter for consistent stats display */
+  private statsFormatter: StatsFormatter;
 
   // ──────────────────────────────────────────────────────────────────────
   // DOM Element References
@@ -189,6 +192,9 @@ export class DashReaderView extends ItemView {
 
     // Initialize timeout manager for memory leak prevention
     this.timeoutManager = new TimeoutManager();
+
+    // Initialize stats formatter for consistent statistics display
+    this.statsFormatter = new StatsFormatter();
 
     // Initialize RSVP engine with callbacks
     this.engine = new RSVPEngine(
@@ -887,15 +893,15 @@ export class DashReaderView extends ItemView {
    * Shows: words read, elapsed time, current WPM, remaining time
    */
   private updateStats(): void {
-    const elapsed = this.engine.getElapsedTime();
-    const currentWpm = this.engine.getCurrentWpmPublic();
-    const remaining = this.engine.getRemainingTime();
-    const wordsRead = this.state.get('wordsRead');
+    const statsText = this.statsFormatter.formatReadingStats({
+      wordsRead: this.state.get('wordsRead'),
+      totalWords: this.engine.getTotalWords(),
+      elapsedTime: this.engine.getElapsedTime(),
+      currentWpm: this.engine.getCurrentWpmPublic(),
+      remainingTime: this.engine.getRemainingTime()
+    });
 
-    this.dom.updateText(
-      'statsText',
-      `${wordsRead}/${this.engine.getTotalWords()} words | ${formatTime(elapsed)} | ${currentWpm} WPM | ${formatTime(remaining)} left`
-    );
+    this.dom.updateText('statsText', statsText);
   }
 
   // ============================================================================
@@ -941,23 +947,23 @@ export class DashReaderView extends ItemView {
     wordIndex: number | undefined,
     source?: { fileName?: string; lineNumber?: number }
   ): void {
-    // Calculate stats
-    const totalWords = this.engine.getTotalWords();
-    const remainingWords = this.engine.getRemainingWords();
-    const estimatedDuration = this.engine.getEstimatedDuration();
-    const durationText = formatTime(estimatedDuration);
+    // Format loaded stats using service
+    const statsText = this.statsFormatter.formatLoadedStats({
+      remainingWords: this.engine.getRemainingWords(),
+      totalWords: this.engine.getTotalWords(),
+      estimatedDuration: this.engine.getEstimatedDuration(),
+      fileName: source?.fileName,
+      startWordIndex: wordIndex
+    });
 
     // Update stats text in footer
-    const fileInfo = source?.fileName ? ` from ${source.fileName}` : '';
-    const wordInfo = wordIndex && wordIndex > 0
-      ? `${remainingWords}/${totalWords} words`
-      : `${totalWords} words`;
-    this.dom.updateText('statsText', `${wordInfo} loaded${fileInfo} - ~${durationText} - Shift+Space to start`);
+    this.dom.updateText('statsText', statsText);
 
     // Display ready message in main word area
+    const durationText = this.statsFormatter.formatTime(this.engine.getEstimatedDuration());
     this.wordDisplay.displayReadyMessage(
-      remainingWords,
-      totalWords,
+      this.engine.getRemainingWords(),
+      this.engine.getTotalWords(),
       wordIndex,
       durationText,
       source?.fileName,

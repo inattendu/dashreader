@@ -2018,6 +2018,126 @@ var TimeoutManager = class {
   }
 };
 
+// src/services/stats-formatter.ts
+var StatsFormatter = class {
+  /**
+   * Format time in seconds to MM:SS format
+   *
+   * @param seconds - Time in seconds
+   * @returns Formatted time string (MM:SS)
+   *
+   * @example
+   * ```typescript
+   * formatTime(0);    // "0:00"
+   * formatTime(45);   // "0:45"
+   * formatTime(90);   // "1:30"
+   * formatTime(3661); // "61:01"
+   * ```
+   */
+  formatTime(seconds) {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
+  }
+  /**
+   * Format reading statistics for display during reading
+   *
+   * Shows: words read/total, elapsed time, current WPM, remaining time
+   *
+   * @param stats - Reading statistics
+   * @returns Formatted stats string
+   *
+   * @example
+   * ```typescript
+   * formatReadingStats({
+   *   wordsRead: 150,
+   *   totalWords: 500,
+   *   elapsedTime: 45,
+   *   currentWpm: 200,
+   *   remainingTime: 105
+   * });
+   * // Returns: "150/500 words | 0:45 | 200 WPM | 1:45 left"
+   * ```
+   */
+  formatReadingStats(stats) {
+    const { wordsRead, totalWords, elapsedTime, currentWpm, remainingTime } = stats;
+    return [
+      `${wordsRead}/${totalWords} words`,
+      this.formatTime(elapsedTime),
+      `${currentWpm} WPM`,
+      `${this.formatTime(remainingTime)} left`
+    ].join(" | ");
+  }
+  /**
+   * Format loaded statistics for display after loading text
+   *
+   * Shows: words loaded, estimated duration, file info, instructions
+   *
+   * @param stats - Loaded statistics
+   * @returns Formatted stats string
+   *
+   * @example
+   * ```typescript
+   * // From beginning
+   * formatLoadedStats({
+   *   remainingWords: 500,
+   *   totalWords: 500,
+   *   estimatedDuration: 150
+   * });
+   * // Returns: "500 words loaded - ~2:30 - Shift+Space to start"
+   *
+   * // From cursor position
+   * formatLoadedStats({
+   *   remainingWords: 300,
+   *   totalWords: 500,
+   *   estimatedDuration: 90,
+   *   fileName: 'document.md',
+   *   startWordIndex: 200
+   * });
+   * // Returns: "300/500 words loaded from document.md - ~1:30 - Shift+Space to start"
+   * ```
+   */
+  formatLoadedStats(stats) {
+    const { remainingWords, totalWords, estimatedDuration, fileName, startWordIndex } = stats;
+    const wordInfo = startWordIndex && startWordIndex > 0 ? `${remainingWords}/${totalWords} words` : `${totalWords} words`;
+    const fileInfo = fileName ? ` from ${fileName}` : "";
+    const durationText = this.formatTime(estimatedDuration);
+    return `${wordInfo} loaded${fileInfo} - ~${durationText} - Shift+Space to start`;
+  }
+  /**
+   * Format word count for display
+   *
+   * @param wordsRead - Words read so far
+   * @param totalWords - Total words in document
+   * @returns Formatted word count string
+   *
+   * @example
+   * ```typescript
+   * formatWordCount(150, 500);  // "150/500 words"
+   * formatWordCount(0, 500);    // "0/500 words"
+   * formatWordCount(500, 500);  // "500/500 words"
+   * ```
+   */
+  formatWordCount(wordsRead, totalWords) {
+    return `${wordsRead}/${totalWords} words`;
+  }
+  /**
+   * Format WPM (words per minute) for display
+   *
+   * @param wpm - Words per minute
+   * @returns Formatted WPM string
+   *
+   * @example
+   * ```typescript
+   * formatWpm(200);  // "200 WPM"
+   * formatWpm(350);  // "350 WPM"
+   * ```
+   */
+  formatWpm(wpm) {
+    return `${wpm} WPM`;
+  }
+};
+
 // src/ui-builders.ts
 function createButton(parent, config) {
   const className = config.className ? `${CSS_CLASSES.btn} ${config.className}` : CSS_CLASSES.btn;
@@ -2086,11 +2206,6 @@ function createPlayPauseButtons(parent, onPlay, onPause, registry) {
 function updatePlayPauseButtons(registry, isPlaying) {
   registry.toggleClass("playBtn", CSS_CLASSES.hidden, isPlaying);
   registry.toggleClass("pauseBtn", CSS_CLASSES.hidden, !isPlaying);
-}
-function formatTime(seconds) {
-  const mins = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  return `${mins}:${secs.toString().padStart(2, "0")}`;
 }
 
 // src/auto-load-manager.ts
@@ -2381,6 +2496,7 @@ var DashReaderView = class extends import_obsidian2.ItemView {
     });
     this.dom = new DOMRegistry();
     this.timeoutManager = new TimeoutManager();
+    this.statsFormatter = new StatsFormatter();
     this.engine = new RSVPEngine(
       settings,
       this.onWordChange.bind(this),
@@ -2960,14 +3076,14 @@ var DashReaderView = class extends import_obsidian2.ItemView {
    * Shows: words read, elapsed time, current WPM, remaining time
    */
   updateStats() {
-    const elapsed = this.engine.getElapsedTime();
-    const currentWpm = this.engine.getCurrentWpmPublic();
-    const remaining = this.engine.getRemainingTime();
-    const wordsRead = this.state.get("wordsRead");
-    this.dom.updateText(
-      "statsText",
-      `${wordsRead}/${this.engine.getTotalWords()} words | ${formatTime(elapsed)} | ${currentWpm} WPM | ${formatTime(remaining)} left`
-    );
+    const statsText = this.statsFormatter.formatReadingStats({
+      wordsRead: this.state.get("wordsRead"),
+      totalWords: this.engine.getTotalWords(),
+      elapsedTime: this.engine.getElapsedTime(),
+      currentWpm: this.engine.getCurrentWpmPublic(),
+      remainingTime: this.engine.getRemainingTime()
+    });
+    this.dom.updateText("statsText", statsText);
   }
   // ============================================================================
   // SECTION 8: TEXT LOADING
@@ -2997,16 +3113,18 @@ var DashReaderView = class extends import_obsidian2.ItemView {
    * @param source - Optional source information (filename, line number)
    */
   updateStatsDisplay(wordIndex, source) {
-    const totalWords = this.engine.getTotalWords();
-    const remainingWords = this.engine.getRemainingWords();
-    const estimatedDuration = this.engine.getEstimatedDuration();
-    const durationText = formatTime(estimatedDuration);
-    const fileInfo = (source == null ? void 0 : source.fileName) ? ` from ${source.fileName}` : "";
-    const wordInfo = wordIndex && wordIndex > 0 ? `${remainingWords}/${totalWords} words` : `${totalWords} words`;
-    this.dom.updateText("statsText", `${wordInfo} loaded${fileInfo} - ~${durationText} - Shift+Space to start`);
+    const statsText = this.statsFormatter.formatLoadedStats({
+      remainingWords: this.engine.getRemainingWords(),
+      totalWords: this.engine.getTotalWords(),
+      estimatedDuration: this.engine.getEstimatedDuration(),
+      fileName: source == null ? void 0 : source.fileName,
+      startWordIndex: wordIndex
+    });
+    this.dom.updateText("statsText", statsText);
+    const durationText = this.statsFormatter.formatTime(this.engine.getEstimatedDuration());
     this.wordDisplay.displayReadyMessage(
-      remainingWords,
-      totalWords,
+      this.engine.getRemainingWords(),
+      this.engine.getTotalWords(),
       wordIndex,
       durationText,
       source == null ? void 0 : source.fileName,
