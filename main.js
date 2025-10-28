@@ -1658,15 +1658,6 @@ var MinimapManager = class {
     this.totalWords = 0;
     this.containerEl = containerEl;
     this.engine = engine;
-    this.minimapEl = null;
-    this.progressEl = null;
-    this.tooltipEl = null;
-    this.initialize();
-  }
-  /**
-   * Initialize the minimap structure
-   */
-  initialize() {
     this.minimapEl = this.containerEl.createDiv({
       cls: "dashreader-minimap"
     });
@@ -1819,6 +1810,129 @@ var MinimapManager = class {
     if (this.tooltipEl) {
       this.tooltipEl.remove();
     }
+  }
+};
+
+// src/services/timeout-manager.ts
+var TimeoutManager = class {
+  constructor() {
+    this.timeouts = /* @__PURE__ */ new Map();
+    this.intervals = /* @__PURE__ */ new Map();
+  }
+  /**
+   * Create a timeout that will be automatically tracked
+   *
+   * @param callback - Function to execute after delay
+   * @param delay - Delay in milliseconds
+   * @returns Timeout ID (can be used with clearTimeout)
+   *
+   * @example
+   * ```typescript
+   * const id = this.timeoutManager.setTimeout(() => {
+   *   console.log('Hello!');
+   * }, 1000);
+   * ```
+   */
+  setTimeout(callback, delay) {
+    const id = window.setTimeout(() => {
+      callback();
+      this.timeouts.delete(id);
+    }, delay);
+    this.timeouts.set(id, id);
+    return id;
+  }
+  /**
+   * Create an interval that will be automatically tracked
+   *
+   * @param callback - Function to execute repeatedly
+   * @param delay - Delay between executions in milliseconds
+   * @returns Interval ID (can be used with clearInterval)
+   *
+   * @example
+   * ```typescript
+   * const id = this.timeoutManager.setInterval(() => {
+   *   console.log('Tick');
+   * }, 1000);
+   * ```
+   */
+  setInterval(callback, delay) {
+    const id = window.setInterval(callback, delay);
+    this.intervals.set(id, id);
+    return id;
+  }
+  /**
+   * Clear a specific timeout
+   *
+   * @param id - Timeout ID returned by setTimeout
+   *
+   * @example
+   * ```typescript
+   * const id = this.timeoutManager.setTimeout(...);
+   * this.timeoutManager.clearTimeout(id); // Cancel it
+   * ```
+   */
+  clearTimeout(id) {
+    window.clearTimeout(id);
+    this.timeouts.delete(id);
+  }
+  /**
+   * Clear a specific interval
+   *
+   * @param id - Interval ID returned by setInterval
+   *
+   * @example
+   * ```typescript
+   * const id = this.timeoutManager.setInterval(...);
+   * this.timeoutManager.clearInterval(id); // Stop it
+   * ```
+   */
+  clearInterval(id) {
+    window.clearInterval(id);
+    this.intervals.delete(id);
+  }
+  /**
+   * Clear all pending timeouts and intervals
+   *
+   * IMPORTANT: Call this in your component's destroy/cleanup method
+   * to prevent memory leaks.
+   *
+   * @example
+   * ```typescript
+   * destroy() {
+   *   this.timeoutManager.clearAll();
+   * }
+   * ```
+   */
+  clearAll() {
+    this.timeouts.forEach((id) => window.clearTimeout(id));
+    this.timeouts.clear();
+    this.intervals.forEach((id) => window.clearInterval(id));
+    this.intervals.clear();
+  }
+  /**
+   * Get the number of active timers (for debugging/testing)
+   *
+   * @returns Number of active timeouts + intervals
+   *
+   * @example
+   * ```typescript
+   * console.log(`Active timers: ${this.timeoutManager.activeCount}`);
+   * ```
+   */
+  get activeCount() {
+    return this.timeouts.size + this.intervals.size;
+  }
+  /**
+   * Get the number of active timeouts only (for debugging/testing)
+   */
+  get activeTimeouts() {
+    return this.timeouts.size;
+  }
+  /**
+   * Get the number of active intervals only (for debugging/testing)
+   */
+  get activeIntervals() {
+    return this.intervals.size;
   }
 };
 
@@ -2181,6 +2295,7 @@ var DashReaderView = class extends import_obsidian2.ItemView {
       currentFontSize: settings.fontSize
     });
     this.dom = new DOMRegistry();
+    this.timeoutManager = new TimeoutManager();
     this.engine = new RSVPEngine(
       settings,
       this.onWordChange.bind(this),
@@ -2256,6 +2371,7 @@ var DashReaderView = class extends import_obsidian2.ItemView {
    */
   async onClose() {
     this.engine.stop();
+    this.timeoutManager.clearAll();
     this.dom.clear();
   }
   // ============================================================================
@@ -2632,7 +2748,7 @@ var DashReaderView = class extends import_obsidian2.ItemView {
       })
     );
     this.registerDomEvent(document, "mouseup", () => {
-      setTimeout(() => {
+      this.timeoutManager.setTimeout(() => {
         if (this.mainContainerEl.isShown()) {
           this.autoLoadManager.checkSelectionOrCursor();
         }
@@ -2640,7 +2756,7 @@ var DashReaderView = class extends import_obsidian2.ItemView {
     });
     this.registerDomEvent(document, "keyup", (evt) => {
       if (isNavigationKey(evt) || isSelectionKey(evt)) {
-        setTimeout(() => {
+        this.timeoutManager.setTimeout(() => {
           if (this.mainContainerEl.isShown()) {
             this.autoLoadManager.checkSelectionOrCursor();
           }
@@ -2852,7 +2968,7 @@ var DashReaderView = class extends import_obsidian2.ItemView {
       this.minimapManager.render();
     }
     if (this.settings.autoStart) {
-      setTimeout(() => {
+      this.timeoutManager.setTimeout(() => {
         this.engine.play();
         updatePlayPauseButtons(this.dom, true);
         this.state.set("startTime", Date.now());

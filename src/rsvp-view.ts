@@ -61,6 +61,7 @@ import { BreadcrumbManager } from './breadcrumb-manager';
 import { WordDisplay } from './word-display';
 import { HotkeyHandler } from './hotkey-handler';
 import { MinimapManager } from './minimap-manager';
+import { TimeoutManager } from './services/timeout-manager';
 import {
   createButton,
   createNumberControl,
@@ -125,6 +126,9 @@ export class DashReaderView extends ItemView {
   /** Minimap navigation manager */
   private minimapManager: MinimapManager;
 
+  /** Timeout manager for preventing memory leaks */
+  private timeoutManager: TimeoutManager;
+
   // ──────────────────────────────────────────────────────────────────────
   // DOM Element References
   // ──────────────────────────────────────────────────────────────────────
@@ -182,6 +186,9 @@ export class DashReaderView extends ItemView {
 
     // Initialize DOM registry for efficient element updates
     this.dom = new DOMRegistry();
+
+    // Initialize timeout manager for memory leak prevention
+    this.timeoutManager = new TimeoutManager();
 
     // Initialize RSVP engine with callbacks
     this.engine = new RSVPEngine(
@@ -273,6 +280,7 @@ export class DashReaderView extends ItemView {
    */
   async onClose(): Promise<void> {
     this.engine.stop();
+    this.timeoutManager.clearAll();
     this.dom.clear();
   }
 
@@ -722,7 +730,7 @@ export class DashReaderView extends ItemView {
 
     // Mouse events for cursor tracking
     this.registerDomEvent(document, 'mouseup', () => {
-      setTimeout(() => {
+      this.timeoutManager.setTimeout(() => {
         if (this.mainContainerEl.isShown()) {
           this.autoLoadManager.checkSelectionOrCursor();
         }
@@ -732,7 +740,7 @@ export class DashReaderView extends ItemView {
     // Keyboard events for navigation and selection
     this.registerDomEvent(document, 'keyup', (evt: KeyboardEvent) => {
       if (isNavigationKey(evt) || isSelectionKey(evt)) {
-        setTimeout(() => {
+        this.timeoutManager.setTimeout(() => {
           if (this.mainContainerEl.isShown()) {
             this.autoLoadManager.checkSelectionOrCursor();
           }
@@ -1012,7 +1020,7 @@ export class DashReaderView extends ItemView {
 
     // Auto-start if enabled
     if (this.settings.autoStart) {
-      setTimeout(() => {
+      this.timeoutManager.setTimeout(() => {
         this.engine.play();
         updatePlayPauseButtons(this.dom, true);
         this.state.set('startTime', Date.now());

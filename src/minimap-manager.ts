@@ -28,16 +28,8 @@ export class MinimapManager {
   constructor(containerEl: HTMLElement, engine: RSVPEngine) {
     this.containerEl = containerEl;
     this.engine = engine;
-    this.minimapEl = null as any;
-    this.progressEl = null as any;
-    this.tooltipEl = null as any;
-    this.initialize();
-  }
 
-  /**
-   * Initialize the minimap structure
-   */
-  private initialize(): void {
+    // Initialize minimap structure immediately (no null as any!)
     // Create minimap container
     this.minimapEl = this.containerEl.createDiv({
       cls: 'dashreader-minimap'
