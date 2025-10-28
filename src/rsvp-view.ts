@@ -194,14 +194,16 @@ export class DashReaderView extends ItemView {
     this.engine = new RSVPEngine(
       settings,
       this.onWordChange.bind(this),
-      this.onComplete.bind(this)
+      this.onComplete.bind(this),
+      this.timeoutManager
     );
 
     // Initialize auto-load manager for editor integration
     this.autoLoadManager = new AutoLoadManager(
       this.app,
       this.loadText.bind(this),
-      () => this.mainContainerEl?.isShown() ?? false
+      () => this.mainContainerEl?.isShown() ?? false,
+      this.timeoutManager
     );
   }
 
@@ -242,7 +244,7 @@ export class DashReaderView extends ItemView {
     this.buildUI();
 
     // Initialize modules after UI is built
-    this.breadcrumbManager = new BreadcrumbManager(this.breadcrumbEl, this.engine);
+    this.breadcrumbManager = new BreadcrumbManager(this.breadcrumbEl, this.engine, this.timeoutManager);
     this.wordDisplay = new WordDisplay(this.wordEl, this.settings);
     this.hotkeyHandler = new HotkeyHandler(this.settings, {
       onTogglePlay: () => this.togglePlay(),
@@ -252,7 +254,7 @@ export class DashReaderView extends ItemView {
       onDecrementWpm: () => this.changeValue('wpm', -10),
       onQuit: () => this.engine.stop()
     });
-    this.minimapManager = new MinimapManager(this.mainContainerEl, this.engine);
+    this.minimapManager = new MinimapManager(this.mainContainerEl, this.engine, this.timeoutManager);
 
     // Display welcome message now that wordDisplay is initialized
     this.wordDisplay.displayWelcomeMessage(

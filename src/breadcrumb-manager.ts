@@ -11,10 +11,12 @@
 import { HeadingContext } from './types';
 import { MenuBuilder } from './menu-builder';
 import { RSVPEngine } from './rsvp-engine';
+import { TimeoutManager } from './services/timeout-manager';
 
 export class BreadcrumbManager {
   private breadcrumbEl: HTMLElement;
   private engine: RSVPEngine;
+  private timeoutManager: TimeoutManager;
   private lastHeadingContext: HeadingContext | null = null;
 
   /**
@@ -35,9 +37,10 @@ export class BreadcrumbManager {
     quote: '💬'
   };
 
-  constructor(breadcrumbEl: HTMLElement, engine: RSVPEngine) {
+  constructor(breadcrumbEl: HTMLElement, engine: RSVPEngine, timeoutManager: TimeoutManager) {
     this.breadcrumbEl = breadcrumbEl;
     this.engine = engine;
+    this.timeoutManager = timeoutManager;
   }
 
   /**
@@ -183,12 +186,13 @@ export class BreadcrumbManager {
       })),
       onItemClick: (wordIndex) => this.navigateToHeading(wordIndex),
       showLevel: true,
-      indentByLevel: true
+      indentByLevel: true,
+      timeoutManager: this.timeoutManager
     });
 
     // Scroll to current item if present
     if (currentHeading) {
-      MenuBuilder.scrollToCurrentItem(menu);
+      MenuBuilder.scrollToCurrentItem(menu, this.timeoutManager);
     }
   }
 

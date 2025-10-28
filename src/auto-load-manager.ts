@@ -60,6 +60,7 @@
 
 import { App, MarkdownView, TFile } from 'obsidian';
 import { TEXT_LIMITS, TIMING } from './constants';
+import { TimeoutManager } from './services/timeout-manager';
 
 /**
  * Callback function for loading text into DashReader view
@@ -304,6 +305,7 @@ export class AutoLoadManager {
   private app: App;
   private loadTextCallback: LoadTextCallback;
   private isViewShown: () => boolean;
+  private timeoutManager: TimeoutManager;
 
   /**
    * Creates a new AutoLoadManager instance
@@ -311,24 +313,28 @@ export class AutoLoadManager {
    * @param app - Obsidian App instance for accessing workspace and editor
    * @param loadTextCallback - Callback function to load text into DashReader view
    * @param isViewShown - Function that returns true if DashReader view is currently visible
+   * @param timeoutManager - Timeout manager for proper cleanup
    *
    * @example
    * ```typescript
    * this.autoLoadManager = new AutoLoadManager(
    *   this.app,
    *   (text, source) => this.loadText(text, source),
-   *   () => this.isViewShown
+   *   () => this.isViewShown,
+   *   this.timeoutManager
    * );
    * ```
    */
   constructor(
     app: App,
     loadTextCallback: LoadTextCallback,
-    isViewShown: () => boolean
+    isViewShown: () => boolean,
+    timeoutManager: TimeoutManager
   ) {
     this.app = app;
     this.loadTextCallback = loadTextCallback;
     this.isViewShown = isViewShown;
+    this.timeoutManager = timeoutManager;
     this.state = {
       lastSelection: '',
       lastFilePath: '',
@@ -442,7 +448,7 @@ export class AutoLoadManager {
    * ```
    */
   loadFromEditor(delay: number = TIMING.autoLoadDelay): void {
-    setTimeout(() => {
+    this.timeoutManager.setTimeout(() => {
       if (!this.isViewShown()) return;
 
       const content = extractEditorContent(this.app);

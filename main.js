@@ -34,7 +34,7 @@ var import_obsidian2 = require("obsidian");
 
 // src/rsvp-engine.ts
 var RSVPEngine = class {
-  constructor(settings, onWordChange, onComplete) {
+  constructor(settings, onWordChange, onComplete, timeoutManager) {
     this.words = [];
     this.currentIndex = 0;
     this.isPlaying = false;
@@ -48,6 +48,7 @@ var RSVPEngine = class {
     this.settings = settings;
     this.onWordChange = onWordChange;
     this.onComplete = onComplete;
+    this.timeoutManager = timeoutManager;
   }
   setText(text, startPosition, startWordIndex) {
     const cleaned = text.replace(/\n+/g, " \xA7\xA7LINEBREAK\xA7\xA7 ").replace(/[ \t]+/g, " ").trim();
@@ -86,7 +87,7 @@ var RSVPEngine = class {
   pause() {
     this.isPlaying = false;
     if (this.timer !== null) {
-      window.clearTimeout(this.timer);
+      this.timeoutManager.clearTimeout(this.timer);
       this.timer = null;
     }
     this.lastPauseTime = Date.now();
@@ -149,7 +150,7 @@ var RSVPEngine = class {
     }
     this.wordsReadInSession++;
     this.currentIndex += this.settings.chunkSize;
-    this.timer = window.setTimeout(() => {
+    this.timer = this.timeoutManager.setTimeout(() => {
       this.displayNextWord();
     }, delay);
   }
@@ -1165,7 +1166,8 @@ var MenuBuilder = class {
       items,
       onItemClick,
       showLevel = false,
-      indentByLevel = false
+      indentByLevel = false,
+      timeoutManager
     } = options;
     const menu = document.body.createDiv({ cls: cssClass });
     const anchorRect = anchorEl.getBoundingClientRect();
@@ -1219,7 +1221,7 @@ var MenuBuilder = class {
         document.removeEventListener("click", closeMenu);
       }
     };
-    setTimeout(() => {
+    timeoutManager.setTimeout(() => {
       document.addEventListener("click", closeMenu);
     }, 10);
     return menu;
@@ -1228,9 +1230,10 @@ var MenuBuilder = class {
    * Scrolls to the current item in the menu (for outline menu)
    *
    * @param menu - The menu element
+   * @param timeoutManager - Timeout manager for proper cleanup
    */
-  static scrollToCurrentItem(menu) {
-    setTimeout(() => {
+  static scrollToCurrentItem(menu, timeoutManager) {
+    timeoutManager.setTimeout(() => {
       const currentItem = menu.querySelector(".dashreader-menu-item-current");
       if (currentItem) {
         currentItem.scrollIntoView({ block: "center" });
@@ -1241,7 +1244,7 @@ var MenuBuilder = class {
 
 // src/breadcrumb-manager.ts
 var BreadcrumbManager = class {
-  constructor(breadcrumbEl, engine) {
+  constructor(breadcrumbEl, engine, timeoutManager) {
     this.lastHeadingContext = null;
     /**
      * Callout icon mapping (consistent with WordDisplay)
@@ -1262,6 +1265,7 @@ var BreadcrumbManager = class {
     };
     this.breadcrumbEl = breadcrumbEl;
     this.engine = engine;
+    this.timeoutManager = timeoutManager;
   }
   /**
    * Updates the breadcrumb navigation bar with current heading context
@@ -1368,10 +1372,11 @@ var BreadcrumbManager = class {
       })),
       onItemClick: (wordIndex) => this.navigateToHeading(wordIndex),
       showLevel: true,
-      indentByLevel: true
+      indentByLevel: true,
+      timeoutManager: this.timeoutManager
     });
     if (currentHeading) {
-      MenuBuilder.scrollToCurrentItem(menu);
+      MenuBuilder.scrollToCurrentItem(menu, this.timeoutManager);
     }
   }
   /**
@@ -1653,11 +1658,12 @@ var HotkeyHandler = class {
 
 // src/minimap-manager.ts
 var MinimapManager = class {
-  constructor(containerEl, engine) {
+  constructor(containerEl, engine, timeoutManager) {
     this.currentWordIndex = 0;
     this.totalWords = 0;
     this.containerEl = containerEl;
     this.engine = engine;
+    this.timeoutManager = timeoutManager;
     this.minimapEl = this.containerEl.createDiv({
       cls: "dashreader-minimap"
     });
@@ -1758,7 +1764,7 @@ var MinimapManager = class {
       this.engine.forward(delta);
     }
     if (wasPlaying) {
-      setTimeout(() => {
+      this.timeoutManager.setTimeout(() => {
         this.engine.play();
       }, 300);
     }
@@ -2064,20 +2070,23 @@ var AutoLoadManager = class {
    * @param app - Obsidian App instance for accessing workspace and editor
    * @param loadTextCallback - Callback function to load text into DashReader view
    * @param isViewShown - Function that returns true if DashReader view is currently visible
+   * @param timeoutManager - Timeout manager for proper cleanup
    *
    * @example
    * ```typescript
    * this.autoLoadManager = new AutoLoadManager(
    *   this.app,
    *   (text, source) => this.loadText(text, source),
-   *   () => this.isViewShown
+   *   () => this.isViewShown,
+   *   this.timeoutManager
    * );
    * ```
    */
-  constructor(app, loadTextCallback, isViewShown) {
+  constructor(app, loadTextCallback, isViewShown, timeoutManager) {
     this.app = app;
     this.loadTextCallback = loadTextCallback;
     this.isViewShown = isViewShown;
+    this.timeoutManager = timeoutManager;
     this.state = {
       lastSelection: "",
       lastFilePath: "",
@@ -2183,7 +2192,7 @@ var AutoLoadManager = class {
    * ```
    */
   loadFromEditor(delay = TIMING.autoLoadDelay) {
-    setTimeout(() => {
+    this.timeoutManager.setTimeout(() => {
       if (!this.isViewShown())
         return;
       const content = extractEditorContent(this.app);
@@ -2299,7 +2308,8 @@ var DashReaderView = class extends import_obsidian2.ItemView {
     this.engine = new RSVPEngine(
       settings,
       this.onWordChange.bind(this),
-      this.onComplete.bind(this)
+      this.onComplete.bind(this),
+      this.timeoutManager
     );
     this.autoLoadManager = new AutoLoadManager(
       this.app,
@@ -2307,7 +2317,8 @@ var DashReaderView = class extends import_obsidian2.ItemView {
       () => {
         var _a, _b;
         return (_b = (_a = this.mainContainerEl) == null ? void 0 : _a.isShown()) != null ? _b : false;
-      }
+      },
+      this.timeoutManager
     );
   }
   // ──────────────────────────────────────────────────────────────────────
@@ -2341,7 +2352,7 @@ var DashReaderView = class extends import_obsidian2.ItemView {
   async onOpen() {
     this.mainContainerEl = this.contentEl.createDiv({ cls: CSS_CLASSES.container });
     this.buildUI();
-    this.breadcrumbManager = new BreadcrumbManager(this.breadcrumbEl, this.engine);
+    this.breadcrumbManager = new BreadcrumbManager(this.breadcrumbEl, this.engine, this.timeoutManager);
     this.wordDisplay = new WordDisplay(this.wordEl, this.settings);
     this.hotkeyHandler = new HotkeyHandler(this.settings, {
       onTogglePlay: () => this.togglePlay(),
@@ -2351,7 +2362,7 @@ var DashReaderView = class extends import_obsidian2.ItemView {
       onDecrementWpm: () => this.changeValue("wpm", -10),
       onQuit: () => this.engine.stop()
     });
-    this.minimapManager = new MinimapManager(this.mainContainerEl, this.engine);
+    this.minimapManager = new MinimapManager(this.mainContainerEl, this.engine, this.timeoutManager);
     this.wordDisplay.displayWelcomeMessage(
       ICONS.book,
       "Select text to start reading",

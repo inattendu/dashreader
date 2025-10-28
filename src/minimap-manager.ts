@@ -1,5 +1,6 @@
 import { RSVPEngine } from './rsvp-engine';
 import { HeadingInfo } from './types';
+import { TimeoutManager } from './services/timeout-manager';
 
 /**
  * MinimapManager
@@ -22,12 +23,14 @@ export class MinimapManager {
   private progressEl: HTMLElement;
   private tooltipEl: HTMLElement;
   private engine: RSVPEngine;
+  private timeoutManager: TimeoutManager;
   private currentWordIndex: number = 0;
   private totalWords: number = 0;
 
-  constructor(containerEl: HTMLElement, engine: RSVPEngine) {
+  constructor(containerEl: HTMLElement, engine: RSVPEngine, timeoutManager: TimeoutManager) {
     this.containerEl = containerEl;
     this.engine = engine;
+    this.timeoutManager = timeoutManager;
 
     // Initialize minimap structure immediately (no null as any!)
     // Create minimap container
@@ -175,7 +178,7 @@ export class MinimapManager {
 
     // Resume reading after a short delay (gives user time to see the jump)
     if (wasPlaying) {
-      setTimeout(() => {
+      this.timeoutManager.setTimeout(() => {
         this.engine.play();
       }, 300);
     }

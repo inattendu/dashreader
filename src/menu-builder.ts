@@ -8,6 +8,8 @@
  * - Outside click detection for closing
  */
 
+import { TimeoutManager } from './services/timeout-manager';
+
 export interface MenuItem {
   text: string;
   wordIndex: number;
@@ -23,6 +25,7 @@ export interface MenuOptions {
   onItemClick: (wordIndex: number) => void;
   showLevel?: boolean;
   indentByLevel?: boolean;
+  timeoutManager: TimeoutManager;
 }
 
 export class MenuBuilder {
@@ -40,7 +43,8 @@ export class MenuBuilder {
       items,
       onItemClick,
       showLevel = false,
-      indentByLevel = false
+      indentByLevel = false,
+      timeoutManager
     } = options;
 
     // Create menu in document body for proper positioning
@@ -121,7 +125,7 @@ export class MenuBuilder {
     };
 
     // Delay adding the listener to avoid immediate close from the current click
-    setTimeout(() => {
+    timeoutManager.setTimeout(() => {
       document.addEventListener('click', closeMenu);
     }, 10);
 
@@ -132,9 +136,10 @@ export class MenuBuilder {
    * Scrolls to the current item in the menu (for outline menu)
    *
    * @param menu - The menu element
+   * @param timeoutManager - Timeout manager for proper cleanup
    */
-  static scrollToCurrentItem(menu: HTMLElement): void {
-    setTimeout(() => {
+  static scrollToCurrentItem(menu: HTMLElement, timeoutManager: TimeoutManager): void {
+    timeoutManager.setTimeout(() => {
       const currentItem = menu.querySelector('.dashreader-menu-item-current') as HTMLElement;
       if (currentItem) {
         currentItem.scrollIntoView({ block: 'center' });

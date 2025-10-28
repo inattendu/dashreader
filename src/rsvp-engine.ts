@@ -1,4 +1,5 @@
 import { DashReaderSettings, WordChunk, HeadingInfo, HeadingContext } from './types';
+import { TimeoutManager } from './services/timeout-manager';
 
 export class RSVPEngine {
   private words: string[] = [];
@@ -6,6 +7,7 @@ export class RSVPEngine {
   private isPlaying: boolean = false;
   private timer: number | null = null;
   private settings: DashReaderSettings;
+  private timeoutManager: TimeoutManager;
   private onWordChange: (chunk: WordChunk) => void;
   private onComplete: () => void;
   private startTime: number = 0;
@@ -18,11 +20,13 @@ export class RSVPEngine {
   constructor(
     settings: DashReaderSettings,
     onWordChange: (chunk: WordChunk) => void,
-    onComplete: () => void
+    onComplete: () => void,
+    timeoutManager: TimeoutManager
   ) {
     this.settings = settings;
     this.onWordChange = onWordChange;
     this.onComplete = onComplete;
+    this.timeoutManager = timeoutManager;
   }
 
   setText(text: string, startPosition?: number, startWordIndex?: number): void {
@@ -81,7 +85,7 @@ export class RSVPEngine {
   pause(): void {
     this.isPlaying = false;
     if (this.timer !== null) {
-      window.clearTimeout(this.timer);
+      this.timeoutManager.clearTimeout(this.timer);
       this.timer = null;
     }
     // Enregistrer le moment de la pause
@@ -160,7 +164,7 @@ export class RSVPEngine {
     this.wordsReadInSession++;
     this.currentIndex += this.settings.chunkSize;
 
-    this.timer = window.setTimeout(() => {
+    this.timer = this.timeoutManager.setTimeout(() => {
       this.displayNextWord();
     }, delay);
   }
