@@ -27,18 +27,13 @@ Instead of your eyes moving across lines of text, the text comes to you. Each wo
 - Context display (surrounding words preview)
 
 ### Intelligent Pacing
-- **Slow start** - gradual speed increase over first 5 words to ease into reading
-- **Smart micropauses** based on content type, punctuation, word length, and structure
-  - Sentence-ending punctuation (.,!?): 2.5x delay
-  - Other punctuation (;:,): 1.5x delay
-  - Numbers and dates: 1.8x delay
-  - Long words (>8 chars): 1.4x delay
-  - Paragraph breaks: 2.5x delay
-- **Heading-aware pauses** - longer pauses before H1 (2x), H2 (1.8x), H3 (1.5x), etc.
-- **Callout-aware pauses** - visual separator and 2x delay for Obsidian callouts
-- **Progressive acceleration** - gradually increase speed during reading session
-- Default 400 WPM (comfortable range: 400-800 WPM with practice)
-- All multipliers fully configurable
+
+- **Slow start** - Gradual speed ramp over first 5 words
+- **Smart micropauses** - Configurable delays for sentence punctuation (2.5x), other punctuation (1.5x), numbers (1.8x), long words (1.4x), paragraphs (2.5x)
+- **Heading-aware pauses** - Proportional delays for H1 (2x), H2 (1.8x), H3 (1.5x), etc.
+- **Callout-aware pauses** - Visual separator and 2x delay for Obsidian callouts
+- **Progressive acceleration** - Gradual speed increase during reading session
+- Default 400 WPM (comfortable range: 400-800 WPM)
 
 ### Markdown Support
 - Parses markdown syntax (links, bold, italic, code)
@@ -49,52 +44,34 @@ Instead of your eyes moving across lines of text, the text comes to you. Each wo
 
 ### Contextual Navigation (v1.4.0)
 
-- **Breadcrumb navigation** - shows your position in document structure (H1 › H2 › H3)
-  - Click any heading to jump to that position
-  - Dropdown menus (▼) for navigating between headings of same level
-    - Shows numbered list of all headings at the same level
-    - Works smoothly during active reading (optimized updates)
-    - Centered display with overflow protection
-  - Full heading titles displayed (no truncation, word-wrapping enabled)
-- Updates automatically as you read through sections (only when context changes)
-- Displayed immediately on text load, not just during playback
-- Callouts displayed with their respective icons in breadcrumb
-- **Outline menu** (≡) - full document structure overview
-  - Hierarchical view of all headings and callouts
-  - Visual indentation by level
-  - Current position highlighted
-  - Click to jump anywhere in document
-  - Auto-scroll to current position
-- **New tab mode** - click ⤢ button to open in dedicated tab for fullscreen-like experience
+- **Breadcrumb navigation** - Track position in document structure (H1 › H2 › H3)
+- **Outline menu** (≡) - Full document structure with hierarchical view
+- **Dropdown navigation** (▼) - Jump between same-level headings
+- Click any heading to jump instantly
+- New tab mode (⤢) for dedicated fullscreen-like experience
+- Updates automatically during reading (optimized for performance)
 
 ### Visual Minimap (v1.4.0)
 
-- **Document overview** - vertical line showing reading progress
-  - Heading markers positioned proportionally to document structure
-  - Visual size hierarchy: H1 (large) › H2 (medium) › H3 (small)
-  - Current position indicator with smooth tracking
-  - Progress fill from top to current position
-- **Instant navigation** - click any heading marker to jump
-- **Rich tooltips** - hover to see heading text and callout icons
-- **Nearly invisible** - subtle presence, becomes visible on hover
-- **Always accessible** - visible throughout reading session
-- Toggle visibility via settings or toolbar button (👁)
+- Vertical progress line with proportional heading markers
+- Visual size hierarchy (H1 large › H2 medium › H3 small)
+- Click markers to jump instantly, hover for heading tooltips
+- Subtle appearance with hover activation
+- Toggleable via settings or toolbar (👁)
 
 ### Smart Positioning
-- **Click-to-start** - automatically begins reading from cursor position
+
+- Automatically begins reading from cursor position
 - Tracks keyboard navigation in real-time
-- Updates on cursor movement (arrows, page up/down, vim keys)
-- Calculates accurate word position after markdown parsing
+- Accurate word position calculation after markdown parsing
 
 ### Interface
 
-- **Adaptive dark/light mode** - follows Obsidian theme
-- **Real-time progress bar** - horizontal progress indicator
-- **Live statistics** - words read, time elapsed, current WPM, remaining time
-- **Estimated reading time** - accurate calculation including all micropauses
-- **Distraction-free design** - clean, minimal interface
-- **Toggleable panels** - show/hide controls and stats as needed
-- **Inline settings** - quick adjustments without leaving reading view
+- Adaptive dark/light mode (follows Obsidian theme)
+- Real-time progress bar and live statistics
+- Accurate time estimation including all micropauses
+- Distraction-free minimal design
+- Toggleable panels and inline settings
 
 ### Keyboard Shortcuts
 - `Shift+Space`: Play/Pause
@@ -133,31 +110,17 @@ Instead of your eyes moving across lines of text, the text comes to you. Each wo
 
 ## Configuration
 
-All settings available in `Settings → DashReader`:
+All settings available in `Settings → DashReader` with editable numeric inputs for precise control:
 
-**Enhanced UI** (v1.4.0): All numeric settings now display editable values next to sliders for precise control
-
-- **Reading Settings**: WPM speed (50-5000), chunk size, font size and family
-- **Slow Start** (v1.4.0): Enable progressive speed ramp over first 5 words for comfortable start
-- **Speed Acceleration**: Enable progressive acceleration, duration, target WPM
-- **Appearance**: Highlight color, text color, background color
-- **Context Display**: Show/hide context words, number of context words
-- **Micropause** (v1.4.0): Enable/disable, all multipliers fully configurable:
-  - Sentence punctuation (.,!?) - default 2.5x
-  - Other punctuation (;:,) - default 1.5x
-  - Numbers and dates - default 1.8x
-  - Long words (>8 chars) - default 1.4x
-  - Paragraphs - default 2.5x
-  - Section markers (1., I., etc.) - default 2.0x
-  - List bullets (-, *, +) - default 1.8x
-  - Obsidian callouts - default 2.0x
-- **Navigation Display**:
-  - Show/hide breadcrumb navigation
-  - Show/hide minimap
-  - Minimap opacity and size controls
-- **Auto-load**: Automatically load content when switching notes/cursor changes
-- **Auto-start**: Enable auto-start, delay duration
-- **Display Options**: Progress bar, statistics visibility
+- **Reading**: WPM speed (50-5000), chunk size, font customization
+- **Slow Start**: Progressive speed ramp over first 5 words
+- **Acceleration**: Progressive speed increase, duration, target WPM
+- **Appearance**: Colors for highlight, text, and background
+- **Context Display**: Toggle context words, adjust count
+- **Micropause**: Configurable multipliers for punctuation, numbers, long words, paragraphs, section markers, list bullets, callouts
+- **Navigation**: Toggle breadcrumb/minimap, adjust opacity and size
+- **Auto-load/Auto-start**: Automatic content loading and playback
+- **Display**: Progress bar and statistics visibility
 
 ## Technology & Code Quality
 
@@ -211,85 +174,13 @@ All settings available in `Settings → DashReader`:
 
 ## Contributing
 
-Contributions are welcome!
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for:
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing`)
-5. Open a Pull Request
-
-### Development Guidelines
-
-- Follow TypeScript best practices
-- Maintain Obsidian plugin guidelines compliance
-- Add tests for new features
-- Update documentation
-- Keep functions small and focused
-
-## Development
-
-```bash
-# Clone the repo to your vault's plugin folder
-cd /path/to/vault/.obsidian/plugins
-git clone https://github.com/inattendu/dashreader
-
-# Install dependencies
-cd dashreader
-npm install
-
-# Build for production
-npm run build
-
-# Build and watch for changes
-npm run dev
-
-# Run tests (coming soon)
-npm test
-
-# Type checking
-npx tsc --noEmit
-```
-
-### Project Structure
-
-```text
-dashreader/
-├── src/
-│   ├── rsvp-view.ts              # Main view component
-│   ├── rsvp-engine.ts            # Reading engine logic
-│   ├── markdown-parser.ts        # Markdown to plain text
-│   ├── word-display.ts           # Word rendering
-│   ├── breadcrumb-manager.ts     # Navigation breadcrumb
-│   ├── minimap-manager.ts        # Visual minimap
-│   ├── menu-builder.ts           # Dropdown menus
-│   ├── auto-load-manager.ts      # Auto-load functionality
-│   ├── hotkey-handler.ts         # Keyboard shortcuts
-│   ├── dom-registry.ts           # DOM element management
-│   ├── view-state.ts             # Reactive state
-│   ├── ui-builders.ts            # UI component builders
-│   ├── constants.ts              # CSS classes, timing, limits
-│   ├── logger.ts                 # Centralized logging
-│   ├── settings.ts               # Settings tab
-│   ├── types.ts                  # TypeScript interfaces
-│   └── services/
-│       ├── timeout-manager.ts    # Timer management
-│       ├── settings-validator.ts # Settings validation
-│       ├── micropause-service.ts # Micropause calculation
-│       └── stats-formatter.ts    # Statistics formatting
-├── styles.css                    # Plugin styles
-├── main.ts                       # Plugin entry point
-├── manifest.json                 # Plugin manifest
-└── CLAUDE.md                     # Architecture documentation
-```
-
-### Key Commands
-
-- `npm run build` - Production build (TypeScript + esbuild)
-- `npm run dev` - Development with watch mode
-- `npm run version` - Bump version (updates manifest.json)
-
-See [CLAUDE.md](CLAUDE.md) for detailed architecture documentation.
+- Development setup and guidelines
+- Obsidian plugin guidelines compliance
+- Project structure and architecture
+- Git workflow and commit conventions
+- Pull request guidelines
 
 ## License
 
