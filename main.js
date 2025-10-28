@@ -1351,10 +1351,10 @@ var BreadcrumbManager = class {
    */
   updateBreadcrumb(context) {
     if (!context || context.breadcrumb.length === 0) {
-      this.breadcrumbEl.style.display = "none";
+      this.breadcrumbEl.toggleClass(CSS_CLASSES.hidden, true);
       return;
     }
-    this.breadcrumbEl.style.display = "flex";
+    this.breadcrumbEl.toggleClass(CSS_CLASSES.hidden, false);
     this.breadcrumbEl.empty();
     this.breadcrumbEl.createSpan({
       text: "\u{1F4D1}",
@@ -1765,10 +1765,10 @@ var MinimapManager = class {
     const headings = this.engine.getHeadings();
     this.totalWords = this.engine.getTotalWords();
     if (headings.length === 0 || this.totalWords === 0) {
-      this.minimapEl.style.display = "none";
+      this.minimapEl.toggleClass(CSS_CLASSES.hidden, true);
       return;
     }
-    this.minimapEl.style.display = "block";
+    this.minimapEl.toggleClass(CSS_CLASSES.hidden, false);
     headings.forEach((heading, index) => {
       this.createPoint(heading, index);
     });
@@ -1871,7 +1871,7 @@ var MinimapManager = class {
    */
   show() {
     if (this.minimapEl) {
-      this.minimapEl.style.display = "block";
+      this.minimapEl.toggleClass(CSS_CLASSES.hidden, false);
     }
   }
   /**
@@ -1879,7 +1879,7 @@ var MinimapManager = class {
    */
   hide() {
     if (this.minimapEl) {
-      this.minimapEl.style.display = "none";
+      this.minimapEl.toggleClass(CSS_CLASSES.hidden, true);
     }
   }
   /**
@@ -2627,9 +2627,8 @@ var DashReaderView = class extends import_obsidian2.ItemView {
    */
   buildBreadcrumb() {
     this.breadcrumbEl = this.mainContainerEl.createDiv({
-      cls: "dashreader-breadcrumb"
+      cls: `dashreader-breadcrumb ${CSS_CLASSES.hidden}`
     });
-    this.breadcrumbEl.style.display = "none";
   }
   /**
    * Builds the statistics display panel
@@ -2872,12 +2871,12 @@ var DashReaderView = class extends import_obsidian2.ItemView {
    * Toggles the visibility of context before/after current word
    */
   toggleContextDisplay() {
-    const display = this.settings.showContext ? "block" : "none";
+    const shouldHide = !this.settings.showContext;
     if (this.contextBeforeEl) {
-      this.contextBeforeEl.style.display = display;
+      this.contextBeforeEl.toggleClass(CSS_CLASSES.hidden, shouldHide);
     }
     if (this.contextAfterEl) {
-      this.contextAfterEl.style.display = display;
+      this.contextAfterEl.toggleClass(CSS_CLASSES.hidden, shouldHide);
     }
   }
   /**
@@ -2896,9 +2895,9 @@ var DashReaderView = class extends import_obsidian2.ItemView {
    * Toggle breadcrumb visibility
    */
   toggleBreadcrumbDisplay() {
-    const display = this.settings.showBreadcrumb ? "flex" : "none";
+    const shouldHide = !this.settings.showBreadcrumb;
     if (this.breadcrumbEl) {
-      this.breadcrumbEl.style.display = display;
+      this.breadcrumbEl.toggleClass(CSS_CLASSES.hidden, shouldHide);
     }
   }
   /**
@@ -3755,7 +3754,7 @@ var DashReaderPlugin = class extends import_obsidian4.Plugin {
     });
     this.addCommand({
       id: "open-dashreader",
-      name: "Open DashReader",
+      name: "Open RSVP reader",
       callback: () => {
         this.activateView();
       }

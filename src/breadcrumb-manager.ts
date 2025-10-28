@@ -12,6 +12,7 @@ import { HeadingContext } from './types';
 import { MenuBuilder } from './menu-builder';
 import { RSVPEngine } from './rsvp-engine';
 import { TimeoutManager } from './services/timeout-manager';
+import { CSS_CLASSES } from './constants';
 
 export class BreadcrumbManager {
   private breadcrumbEl: HTMLElement;
@@ -52,12 +53,12 @@ export class BreadcrumbManager {
   updateBreadcrumb(context: HeadingContext): void {
     if (!context || context.breadcrumb.length === 0) {
       // No headings, hide breadcrumb
-      this.breadcrumbEl.style.display = 'none';
+      this.breadcrumbEl.toggleClass(CSS_CLASSES.hidden, true);
       return;
     }
 
-    // Show breadcrumb (display: flex already in CSS)
-    this.breadcrumbEl.style.display = 'flex';
+    // Show breadcrumb
+    this.breadcrumbEl.toggleClass(CSS_CLASSES.hidden, false);
     this.breadcrumbEl.empty();
 
     // === SIMPLIFIED BREADCRUMB: 📑 H1 › H2 › H3 ▼ ===

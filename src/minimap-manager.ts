@@ -1,6 +1,7 @@
 import { RSVPEngine } from './rsvp-engine';
 import { HeadingInfo } from './types';
 import { TimeoutManager } from './services/timeout-manager';
+import { CSS_CLASSES } from './constants';
 
 /**
  * MinimapManager
@@ -69,11 +70,11 @@ export class MinimapManager {
     this.totalWords = this.engine.getTotalWords();
 
     if (headings.length === 0 || this.totalWords === 0) {
-      this.minimapEl.style.display = 'none';
+      this.minimapEl.toggleClass(CSS_CLASSES.hidden, true);
       return;
     }
 
-    this.minimapEl.style.display = 'block';
+    this.minimapEl.toggleClass(CSS_CLASSES.hidden, false);
 
     // Create points for each heading
     headings.forEach((heading, index) => {
@@ -220,7 +221,7 @@ export class MinimapManager {
    */
   show(): void {
     if (this.minimapEl) {
-      this.minimapEl.style.display = 'block';
+      this.minimapEl.toggleClass(CSS_CLASSES.hidden, false);
     }
   }
 
@@ -229,7 +230,7 @@ export class MinimapManager {
    */
   hide(): void {
     if (this.minimapEl) {
-      this.minimapEl.style.display = 'none';
+      this.minimapEl.toggleClass(CSS_CLASSES.hidden, true);
     }
   }
 

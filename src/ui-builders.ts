@@ -722,7 +722,7 @@ export function togglePanel(
 /**
  * Creates a conditional group that can be shown/hidden
  *
- * @deprecated Use direct style.display manipulation instead. This function
+ * @deprecated Use direct toggleClass manipulation instead. This function
  * adds unnecessary abstraction.
  *
  * Used for acceleration settings that appear when acceleration is enabled.
@@ -736,7 +736,7 @@ export function createConditionalGroup(
   config: ConditionalGroupConfig
 ): HTMLElement {
   const container = parent.createDiv({ cls: CSS_CLASSES.settingGroup });
-  container.style.display = config.condition ? 'flex' : 'none';
+  container.toggleClass(CSS_CLASSES.hidden, !config.condition);
   return container;
 }
 

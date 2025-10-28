@@ -348,10 +348,9 @@ export class DashReaderView extends ItemView {
    */
   private buildBreadcrumb(): void {
     this.breadcrumbEl = this.mainContainerEl.createDiv({
-      cls: 'dashreader-breadcrumb'
+      cls: `dashreader-breadcrumb ${CSS_CLASSES.hidden}`
     });
     // Initially empty, will be populated by updateBreadcrumb()
-    this.breadcrumbEl.style.display = 'none'; // Hidden until we have content
   }
 
   /**
@@ -643,12 +642,12 @@ export class DashReaderView extends ItemView {
    * Toggles the visibility of context before/after current word
    */
   private toggleContextDisplay(): void {
-    const display = this.settings.showContext ? 'block' : 'none';
+    const shouldHide = !this.settings.showContext;
     if (this.contextBeforeEl) {
-      this.contextBeforeEl.style.display = display;
+      this.contextBeforeEl.toggleClass(CSS_CLASSES.hidden, shouldHide);
     }
     if (this.contextAfterEl) {
-      this.contextAfterEl.style.display = display;
+      this.contextAfterEl.toggleClass(CSS_CLASSES.hidden, shouldHide);
     }
   }
 
@@ -669,9 +668,9 @@ export class DashReaderView extends ItemView {
    * Toggle breadcrumb visibility
    */
   private toggleBreadcrumbDisplay(): void {
-    const display = this.settings.showBreadcrumb ? 'flex' : 'none';
+    const shouldHide = !this.settings.showBreadcrumb;
     if (this.breadcrumbEl) {
-      this.breadcrumbEl.style.display = display;
+      this.breadcrumbEl.toggleClass(CSS_CLASSES.hidden, shouldHide);
     }
   }
 

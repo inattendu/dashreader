@@ -45,6 +45,7 @@
 
 /* ===== BREADCRUMB NAVIGATION (Discreet but visible) ===== */
 .dashreader-breadcrumb {
+  display: flex;
   padding: 8px 20px;
   background: transparent;
   font-size: 13px;
@@ -54,7 +55,6 @@
   scrollbar-width: thin;
   opacity: 0.5;
   transition: opacity 0.3s ease;
-  /* Flex layout properties (set via JS for conditional display) */
   align-items: center;
   gap: 8px;
 }
@@ -157,6 +157,7 @@
 /* Contexte */
 .dashreader-context-before,
 .dashreader-context-after {
+  display: block;
   font-size: 16px;
   color: var(--text-muted);
   opacity: 0.5;
@@ -229,6 +230,7 @@
 
 /* ===== MINIMAP VERTICALE (Compact and usable) ===== */
 .dashreader-minimap {
+  display: block;
   position: fixed;
   right: 10px;
   top: 50%;
