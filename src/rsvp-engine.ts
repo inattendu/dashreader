@@ -1,4 +1,6 @@
-import { DashReaderSettings, WordChunk } from './types';
+import { DashReaderSettings, WordChunk, HeadingInfo, HeadingContext } from './types';
+import { TimeoutManager } from './services/timeout-manager';
+import { MicropauseService } from './services/micropause-service';
 
 export class RSVPEngine {
   private words: string[] = [];
@@ -6,48 +8,58 @@ export class RSVPEngine {
   private isPlaying: boolean = false;
   private timer: number | null = null;
   private settings: DashReaderSettings;
+  private timeoutManager: TimeoutManager;
+  private micropauseService: MicropauseService;
   private onWordChange: (chunk: WordChunk) => void;
   private onComplete: () => void;
   private startTime: number = 0;
   private startWpm: number = 0;
   private pausedTime: number = 0;
   private lastPauseTime: number = 0;
+  private headings: HeadingInfo[] = [];
+  private wordsReadInSession: number = 0;
 
   constructor(
     settings: DashReaderSettings,
     onWordChange: (chunk: WordChunk) => void,
-    onComplete: () => void
+    onComplete: () => void,
+    timeoutManager: TimeoutManager
   ) {
     this.settings = settings;
     this.onWordChange = onWordChange;
     this.onComplete = onComplete;
+    this.timeoutManager = timeoutManager;
+    this.micropauseService = new MicropauseService(settings);
   }
 
   setText(text: string, startPosition?: number, startWordIndex?: number): void {
-    console.log('DashReader Engine: setText called with startPosition:', startPosition, 'startWordIndex:', startWordIndex);
-
     // Nettoyer et diviser le texte en mots
+    // Important: preserve line breaks by replacing them with a marker FIRST
     const cleaned = text
-      .replace(/\s+/g, ' ')
-      .replace(/\n+/g, '\n')
+      .replace(/\n+/g, ' §§LINEBREAK§§ ')  // Replace line breaks FIRST
+      .replace(/[ \t]+/g, ' ')              // Then clean up spaces/tabs (NOT \n!)
       .trim();
 
     this.words = cleaned.split(/\s+/);
-    console.log('DashReader Engine: Total words after split:', this.words.length);
+
+    // Extraire les headings avec leur position (before replacing markers)
+    this.extractHeadings();
+
+    // Replace line break markers with actual line breaks for display
+    this.words = this.words.map(word =>
+      word === '§§LINEBREAK§§' ? '\n' : word
+    );
 
     // Utiliser l'index du mot si fourni (prioritaire)
     if (startWordIndex !== undefined) {
       this.currentIndex = Math.max(0, Math.min(startWordIndex, this.words.length - 1));
-      console.log('DashReader Engine: Starting at word index', this.currentIndex, '/', this.words.length, '(from startWordIndex)');
     } else if (startPosition !== undefined && startPosition > 0) {
       // Fallback: calculer depuis la position (deprecated)
       const textUpToCursor = text.substring(0, startPosition);
       const wordsBeforeCursor = textUpToCursor.trim().split(/\s+/).length;
       this.currentIndex = Math.min(wordsBeforeCursor, this.words.length - 1);
-      console.log('DashReader Engine: Starting at word index', this.currentIndex, '/', this.words.length, '(from startPosition)');
     } else {
       this.currentIndex = 0;
-      console.log('DashReader Engine: Starting at beginning (no start position)');
     }
   }
 
@@ -63,6 +75,7 @@ export class RSVPEngine {
     if (this.startTime === 0) {
       this.startTime = Date.now();
       this.startWpm = this.settings.wpm;
+      this.wordsReadInSession = 0; // Reset slow start counter
     } else if (this.lastPauseTime > 0) {
       // Si on reprend après une pause, ajouter le temps de pause
       this.pausedTime += Date.now() - this.lastPauseTime;
@@ -75,7 +88,7 @@ export class RSVPEngine {
   pause(): void {
     this.isPlaying = false;
     if (this.timer !== null) {
-      window.clearTimeout(this.timer);
+      this.timeoutManager.clearTimeout(this.timer);
       this.timer = null;
     }
     // Enregistrer le moment de la pause
@@ -90,6 +103,7 @@ export class RSVPEngine {
     this.pausedTime = 0;
     this.lastPauseTime = 0;
     this.startWpm = 0;
+    this.wordsReadInSession = 0; // Reset slow start counter
   }
 
   reset(): void {
@@ -137,11 +151,23 @@ export class RSVPEngine {
     const chunk = this.getChunk(this.currentIndex);
     this.onWordChange(chunk);
 
-    const delay = this.calculateDelay(chunk.text);
+    let delay = this.calculateDelay(chunk.text);
 
+    // Slow start: gradually increase speed over first 5 words (if enabled)
+    // Inspired by Stutter: ease into reading to avoid jarring start
+    if (this.settings.enableSlowStart) {
+      const SLOW_START_WORDS = 5;
+      if (this.wordsReadInSession < SLOW_START_WORDS) {
+        const remainingSlowWords = SLOW_START_WORDS - this.wordsReadInSession;
+        const slowStartMultiplier = 1 + (remainingSlowWords / SLOW_START_WORDS);
+        delay *= slowStartMultiplier;
+      }
+    }
+
+    this.wordsReadInSession++;
     this.currentIndex += this.settings.chunkSize;
 
-    this.timer = window.setTimeout(() => {
+    this.timer = this.timeoutManager.setTimeout(() => {
       this.displayNextWord();
     }, delay);
   }
@@ -159,7 +185,8 @@ export class RSVPEngine {
       text,
       index: startIndex,
       delay: this.calculateDelay(text),
-      isEnd: endIndex >= this.words.length
+      isEnd: endIndex >= this.words.length,
+      headingContext: this.getCurrentHeadingContext(startIndex)
     };
   }
 
@@ -189,53 +216,154 @@ export class RSVPEngine {
     const currentWpm = this.getCurrentWpm();
     const baseDelay = (60 / currentWpm) * 1000;
 
-    if (!this.settings.enableMicropause) {
-      return baseDelay;
-    }
-
-    let multiplier = 1.0;
-
-    // Détection des sections et énumérations (début de texte)
-    const trimmedText = text.trim();
-
-    // Micropause pour les headings Markdown [H1], [H2], etc.
-    const headingMatch = trimmedText.match(/^\[H(\d)\]/);
-    if (headingMatch) {
-      const level = parseInt(headingMatch[1]);
-      // Plus le niveau est bas (H1 = 1), plus la pause est longue
-      // H1 = 3.0x, H2 = 2.5x, H3 = 2.0x, H4 = 1.8x, H5 = 1.5x, H6 = 1.3x
-      const headingMultipliers = [0, 3.0, 2.5, 2.0, 1.8, 1.5, 1.3];
-      multiplier *= headingMultipliers[level] || 2.0;
-    }
-
-    // Micropause pour numéros de section (1., 2., I., II., etc.)
-    if (/^(\d+\.|[IVXLCDM]+\.|\w\.)/.test(trimmedText)) {
-      multiplier *= 2.0;
-    }
-
-    // Micropause pour puces de liste (-, *, +, •)
-    if (/^[-*+•]/.test(trimmedText)) {
-      multiplier *= 1.8;
-    }
-
-    // Micropause pour la ponctuation (fin de texte)
-    if (/[.!?;:]$/.test(text)) {
-      multiplier *= this.settings.micropausePunctuation;
-    } else if (/[,]$/.test(text)) {
-      multiplier *= Math.max(1.0, this.settings.micropausePunctuation - 0.3);
-    }
-
-    // Micropause pour les mots longs (>8 caractères)
-    if (text.length > 8) {
-      multiplier *= this.settings.micropauseLongWords;
-    }
-
-    // Micropause pour les sauts de paragraphe
-    if (text.includes('\n')) {
-      multiplier *= this.settings.micropauseParagraph;
-    }
+    // Calculate micropause multiplier using service
+    const multiplier = this.micropauseService.calculateMultiplier(text);
 
     return baseDelay * multiplier;
+  }
+
+  /**
+   * Extract all headings and callouts from the words array
+   * Headings are marked with [H1], [H2], etc.
+   * Callouts are marked with [CALLOUT:type] by the markdown parser
+   *
+   * Since text is split into words, we need to collect all words
+   * that belong to the same heading/callout title.
+   */
+  private extractHeadings(): void {
+    this.headings = [];
+
+    for (let i = 0; i < this.words.length; i++) {
+      const word = this.words[i];
+
+      // Check for regular headings [H1], [H2], etc.
+      const headingMatch = word.match(/^\[H(\d)\](.+)/);
+      if (headingMatch) {
+        const level = parseInt(headingMatch[1]);
+        const firstWord = headingMatch[2];
+
+        // Collect following words until we hit a line break marker
+        // Headings are single-line, so we stop at §§LINEBREAK§§
+        const titleWords = [firstWord];
+        let j = i + 1;
+        while (j < this.words.length) {
+          const nextWord = this.words[j];
+
+          // Stop if we hit the line break marker
+          if (nextWord === '§§LINEBREAK§§') {
+            break;
+          }
+
+          // Stop if we hit another marker
+          if (/^\[H\d\]/.test(nextWord) || /^\[CALLOUT:/.test(nextWord)) {
+            break;
+          }
+
+          // Add word to title
+          titleWords.push(nextWord);
+          j++;
+
+          // Safety limit: max 20 words for a heading
+          if (titleWords.length >= 20) {
+            break;
+          }
+        }
+
+        const text = titleWords.join(' ').trim();
+
+        this.headings.push({
+          level,
+          text,
+          wordIndex: i
+        });
+        continue;
+      }
+
+      // Check for callouts [CALLOUT:type]Title
+      const calloutMatch = word.match(/^\[CALLOUT:([\w-]+)\](.+)/);
+      if (calloutMatch) {
+        const calloutType = calloutMatch[1];
+        const firstWord = calloutMatch[2];
+
+        // Collect following words until we hit a line break marker
+        // Callout titles are single-line, so we stop at §§LINEBREAK§§
+        const titleWords = [firstWord];
+        let j = i + 1;
+        while (j < this.words.length) {
+          const nextWord = this.words[j];
+
+          // Stop if we hit the line break marker
+          if (nextWord === '§§LINEBREAK§§') {
+            break;
+          }
+
+          // Stop if we hit another marker
+          if (/^\[H\d\]/.test(nextWord) || /^\[CALLOUT:/.test(nextWord)) {
+            break;
+          }
+
+          // Add word to title
+          titleWords.push(nextWord);
+          j++;
+
+          // Safety limit: max 20 words for a callout title
+          if (titleWords.length >= 20) {
+            break;
+          }
+        }
+
+        const text = titleWords.join(' ').trim();
+
+        this.headings.push({
+          level: 0, // Special level for callouts
+          text,
+          wordIndex: i,
+          calloutType
+        });
+      }
+    }
+  }
+
+  /**
+   * Get the current heading context (breadcrumb) for a given word index
+   * Returns the hierarchical path of headings leading to the current position
+   *
+   * @param wordIndex - Word index to get context for
+   * @returns Heading context with breadcrumb path and current heading
+   */
+  getCurrentHeadingContext(wordIndex: number): HeadingContext {
+    if (this.headings.length === 0) {
+      return { breadcrumb: [], current: null };
+    }
+
+    // Find all headings before or at the current position
+    const relevantHeadings = this.headings.filter(h => h.wordIndex <= wordIndex);
+
+    if (relevantHeadings.length === 0) {
+      return { breadcrumb: [], current: null };
+    }
+
+    // Build hierarchical breadcrumb
+    const breadcrumb: HeadingInfo[] = [];
+    let currentLevel = 0;
+
+    for (const heading of relevantHeadings) {
+      // If this heading is at a lower or equal level than current, reset the breadcrumb up to this level
+      if (heading.level <= currentLevel) {
+        // Remove all headings from this level onwards
+        while (breadcrumb.length > 0 && breadcrumb[breadcrumb.length - 1].level >= heading.level) {
+          breadcrumb.pop();
+        }
+      }
+
+      breadcrumb.push(heading);
+      currentLevel = heading.level;
+    }
+
+    return {
+      breadcrumb,
+      current: breadcrumb[breadcrumb.length - 1] || null
+    };
   }
 
   getProgress(): number {
@@ -284,6 +412,7 @@ export class RSVPEngine {
 
   updateSettings(settings: DashReaderSettings): void {
     this.settings = settings;
+    this.micropauseService.updateSettings(settings);
   }
 
   getEstimatedDuration(): number {
@@ -313,50 +442,8 @@ export class RSVPEngine {
     for (let i = this.currentIndex; i < this.words.length; i++) {
       const word = this.words[i];
 
-      if (!this.settings.enableMicropause) {
-        // Sans micropause, juste le délai de base
-        totalTimeMs += baseDelay;
-        continue;
-      }
-
-      // Calculer le multiplicateur de micropause pour ce mot
-      let multiplier = 1.0;
-      const trimmedText = word.trim();
-
-      // Micropause pour les headings Markdown [H1], [H2], etc.
-      const headingMatch = trimmedText.match(/^\[H(\d)\]/);
-      if (headingMatch) {
-        const level = parseInt(headingMatch[1]);
-        const headingMultipliers = [0, 3.0, 2.5, 2.0, 1.8, 1.5, 1.3];
-        multiplier *= headingMultipliers[level] || 2.0;
-      }
-
-      // Micropause pour numéros de section (1., 2., I., II., etc.)
-      if (/^(\d+\.|[IVXLCDM]+\.|\w\.)/.test(trimmedText)) {
-        multiplier *= 2.0;
-      }
-
-      // Micropause pour puces de liste (-, *, +, •)
-      if (/^[-*+•]/.test(trimmedText)) {
-        multiplier *= 1.8;
-      }
-
-      // Micropause pour la ponctuation (fin de texte)
-      if (/[.!?;:]$/.test(word)) {
-        multiplier *= this.settings.micropausePunctuation;
-      } else if (/[,]$/.test(word)) {
-        multiplier *= Math.max(1.0, this.settings.micropausePunctuation - 0.3);
-      }
-
-      // Micropause pour les mots longs (>8 caractères)
-      if (word.length > 8) {
-        multiplier *= this.settings.micropauseLongWords;
-      }
-
-      // Micropause pour les sauts de paragraphe
-      if (word.includes('\n')) {
-        multiplier *= this.settings.micropauseParagraph;
-      }
+      // Calculate micropause multiplier using service
+      const multiplier = this.micropauseService.calculateMultiplier(word);
 
       totalTimeMs += baseDelay * multiplier;
     }
@@ -392,5 +479,13 @@ export class RSVPEngine {
   getCurrentWpmPublic(): number {
     // Méthode publique pour obtenir le WPM actuel (pour affichage)
     return this.getCurrentWpm();
+  }
+
+  /**
+   * Returns all headings extracted from the document
+   * Useful for navigation and section counting
+   */
+  getHeadings(): HeadingInfo[] {
+    return this.headings;
   }
 }

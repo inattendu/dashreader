@@ -27,14 +27,158 @@ __export(main_exports, {
   default: () => DashReaderPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian3 = require("obsidian");
+var import_obsidian4 = require("obsidian");
 
 // src/rsvp-view.ts
-var import_obsidian = require("obsidian");
+var import_obsidian2 = require("obsidian");
+
+// src/services/micropause-service.ts
+var _HeadingStrategy = class {
+  getMultiplier(word) {
+    const trimmed = word.trim();
+    const match = trimmed.match(/^\[H(\d)\]/);
+    if (!match)
+      return 1;
+    const level = parseInt(match[1]);
+    return _HeadingStrategy.MULTIPLIERS[level] || 1.5;
+  }
+};
+var HeadingStrategy = _HeadingStrategy;
+HeadingStrategy.MULTIPLIERS = [0, 2, 1.8, 1.5, 1.3, 1.2, 1.1];
+var CalloutStrategy = class {
+  constructor(multiplier) {
+    this.multiplier = multiplier;
+  }
+  getMultiplier(word) {
+    const trimmed = word.trim();
+    return /^\[CALLOUT:[\w-]+\]/.test(trimmed) ? this.multiplier : 1;
+  }
+};
+var SectionMarkerStrategy = class {
+  constructor(multiplier) {
+    this.multiplier = multiplier;
+  }
+  getMultiplier(word) {
+    const trimmed = word.trim();
+    return /^(\d+\.|[IVXLCDM]+\.|\w\.)/.test(trimmed) ? this.multiplier : 1;
+  }
+};
+var ListBulletStrategy = class {
+  constructor(multiplier) {
+    this.multiplier = multiplier;
+  }
+  getMultiplier(word) {
+    const trimmed = word.trim();
+    return /^[-*+•]/.test(trimmed) ? this.multiplier : 1;
+  }
+};
+var SentencePunctuationStrategy = class {
+  constructor(multiplier) {
+    this.multiplier = multiplier;
+  }
+  getMultiplier(word) {
+    return /[.!?]$/.test(word) ? this.multiplier : 1;
+  }
+};
+var OtherPunctuationStrategy = class {
+  constructor(multiplier) {
+    this.multiplier = multiplier;
+  }
+  getMultiplier(word) {
+    return /[;:,]$/.test(word) ? this.multiplier : 1;
+  }
+};
+var NumberStrategy = class {
+  constructor(multiplier) {
+    this.multiplier = multiplier;
+  }
+  getMultiplier(word) {
+    return /\d/.test(word) ? this.multiplier : 1;
+  }
+};
+var LongWordStrategy = class {
+  constructor(multiplier) {
+    this.multiplier = multiplier;
+  }
+  getMultiplier(word) {
+    return word.length > 8 ? this.multiplier : 1;
+  }
+};
+var ParagraphBreakStrategy = class {
+  constructor(multiplier) {
+    this.multiplier = multiplier;
+  }
+  getMultiplier(word) {
+    return word.includes("\n") ? this.multiplier : 1;
+  }
+};
+var MicropauseService = class {
+  constructor(settings) {
+    this.enabled = settings.enableMicropause;
+    this.strategies = [
+      new HeadingStrategy(),
+      new CalloutStrategy(settings.micropauseCallouts),
+      new SectionMarkerStrategy(settings.micropauseSectionMarkers),
+      new ListBulletStrategy(settings.micropauseListBullets),
+      new SentencePunctuationStrategy(settings.micropausePunctuation),
+      new OtherPunctuationStrategy(settings.micropauseOtherPunctuation),
+      new NumberStrategy(settings.micropauseNumbers),
+      new LongWordStrategy(settings.micropauseLongWords),
+      new ParagraphBreakStrategy(settings.micropauseParagraph)
+    ];
+  }
+  /**
+   * Calculates the total multiplier for a word
+   * Applies all strategies and multiplies the results
+   *
+   * @param word - The word to analyze
+   * @returns Total multiplier (1.0 = no pause, >1.0 = longer pause)
+   *
+   * @example
+   * ```typescript
+   * const service = new MicropauseService(settings);
+   *
+   * service.calculateMultiplier("Hello");     // 1.0 (no special characteristics)
+   * service.calculateMultiplier("Hello!");    // 2.5 (sentence punctuation)
+   * service.calculateMultiplier("[H1]Title"); // 2.0 (heading)
+   * service.calculateMultiplier("Hello!\n");  // 6.25 (2.5 * 2.5 = punctuation * paragraph)
+   * ```
+   */
+  calculateMultiplier(word) {
+    if (!this.enabled)
+      return 1;
+    let totalMultiplier = 1;
+    for (const strategy of this.strategies) {
+      const strategyMultiplier = strategy.getMultiplier(word);
+      totalMultiplier *= strategyMultiplier;
+    }
+    return totalMultiplier;
+  }
+  /**
+   * Updates service with new settings
+   * Recreates strategies with updated multipliers
+   *
+   * @param settings - New settings
+   */
+  updateSettings(settings) {
+    this.enabled = settings.enableMicropause;
+    this.strategies = [
+      new HeadingStrategy(),
+      new CalloutStrategy(settings.micropauseCallouts),
+      new SectionMarkerStrategy(settings.micropauseSectionMarkers),
+      new ListBulletStrategy(settings.micropauseListBullets),
+      new SentencePunctuationStrategy(settings.micropausePunctuation),
+      new OtherPunctuationStrategy(settings.micropauseOtherPunctuation),
+      new NumberStrategy(settings.micropauseNumbers),
+      new LongWordStrategy(settings.micropauseLongWords),
+      new ParagraphBreakStrategy(settings.micropauseParagraph)
+    ];
+  }
+};
 
 // src/rsvp-engine.ts
 var RSVPEngine = class {
-  constructor(settings, onWordChange, onComplete) {
+  constructor(settings, onWordChange, onComplete, timeoutManager) {
     this.words = [];
     this.currentIndex = 0;
     this.isPlaying = false;
@@ -43,26 +187,29 @@ var RSVPEngine = class {
     this.startWpm = 0;
     this.pausedTime = 0;
     this.lastPauseTime = 0;
+    this.headings = [];
+    this.wordsReadInSession = 0;
     this.settings = settings;
     this.onWordChange = onWordChange;
     this.onComplete = onComplete;
+    this.timeoutManager = timeoutManager;
+    this.micropauseService = new MicropauseService(settings);
   }
   setText(text, startPosition, startWordIndex) {
-    console.log("DashReader Engine: setText called with startPosition:", startPosition, "startWordIndex:", startWordIndex);
-    const cleaned = text.replace(/\s+/g, " ").replace(/\n+/g, "\n").trim();
+    const cleaned = text.replace(/\n+/g, " \xA7\xA7LINEBREAK\xA7\xA7 ").replace(/[ \t]+/g, " ").trim();
     this.words = cleaned.split(/\s+/);
-    console.log("DashReader Engine: Total words after split:", this.words.length);
+    this.extractHeadings();
+    this.words = this.words.map(
+      (word) => word === "\xA7\xA7LINEBREAK\xA7\xA7" ? "\n" : word
+    );
     if (startWordIndex !== void 0) {
       this.currentIndex = Math.max(0, Math.min(startWordIndex, this.words.length - 1));
-      console.log("DashReader Engine: Starting at word index", this.currentIndex, "/", this.words.length, "(from startWordIndex)");
     } else if (startPosition !== void 0 && startPosition > 0) {
       const textUpToCursor = text.substring(0, startPosition);
       const wordsBeforeCursor = textUpToCursor.trim().split(/\s+/).length;
       this.currentIndex = Math.min(wordsBeforeCursor, this.words.length - 1);
-      console.log("DashReader Engine: Starting at word index", this.currentIndex, "/", this.words.length, "(from startPosition)");
     } else {
       this.currentIndex = 0;
-      console.log("DashReader Engine: Starting at beginning (no start position)");
     }
   }
   play() {
@@ -75,6 +222,7 @@ var RSVPEngine = class {
     if (this.startTime === 0) {
       this.startTime = Date.now();
       this.startWpm = this.settings.wpm;
+      this.wordsReadInSession = 0;
     } else if (this.lastPauseTime > 0) {
       this.pausedTime += Date.now() - this.lastPauseTime;
       this.lastPauseTime = 0;
@@ -84,7 +232,7 @@ var RSVPEngine = class {
   pause() {
     this.isPlaying = false;
     if (this.timer !== null) {
-      window.clearTimeout(this.timer);
+      this.timeoutManager.clearTimeout(this.timer);
       this.timer = null;
     }
     this.lastPauseTime = Date.now();
@@ -96,6 +244,7 @@ var RSVPEngine = class {
     this.pausedTime = 0;
     this.lastPauseTime = 0;
     this.startWpm = 0;
+    this.wordsReadInSession = 0;
   }
   reset() {
     this.stop();
@@ -135,9 +284,18 @@ var RSVPEngine = class {
     }
     const chunk = this.getChunk(this.currentIndex);
     this.onWordChange(chunk);
-    const delay = this.calculateDelay(chunk.text);
+    let delay = this.calculateDelay(chunk.text);
+    if (this.settings.enableSlowStart) {
+      const SLOW_START_WORDS = 5;
+      if (this.wordsReadInSession < SLOW_START_WORDS) {
+        const remainingSlowWords = SLOW_START_WORDS - this.wordsReadInSession;
+        const slowStartMultiplier = 1 + remainingSlowWords / SLOW_START_WORDS;
+        delay *= slowStartMultiplier;
+      }
+    }
+    this.wordsReadInSession++;
     this.currentIndex += this.settings.chunkSize;
-    this.timer = window.setTimeout(() => {
+    this.timer = this.timeoutManager.setTimeout(() => {
       this.displayNextWord();
     }, delay);
   }
@@ -152,7 +310,8 @@ var RSVPEngine = class {
       text,
       index: startIndex,
       delay: this.calculateDelay(text),
-      isEnd: endIndex >= this.words.length
+      isEnd: endIndex >= this.words.length,
+      headingContext: this.getCurrentHeadingContext(startIndex)
     };
   }
   getCurrentWpm() {
@@ -171,35 +330,110 @@ var RSVPEngine = class {
   calculateDelay(text) {
     const currentWpm = this.getCurrentWpm();
     const baseDelay = 60 / currentWpm * 1e3;
-    if (!this.settings.enableMicropause) {
-      return baseDelay;
-    }
-    let multiplier = 1;
-    const trimmedText = text.trim();
-    const headingMatch = trimmedText.match(/^\[H(\d)\]/);
-    if (headingMatch) {
-      const level = parseInt(headingMatch[1]);
-      const headingMultipliers = [0, 3, 2.5, 2, 1.8, 1.5, 1.3];
-      multiplier *= headingMultipliers[level] || 2;
-    }
-    if (/^(\d+\.|[IVXLCDM]+\.|\w\.)/.test(trimmedText)) {
-      multiplier *= 2;
-    }
-    if (/^[-*+•]/.test(trimmedText)) {
-      multiplier *= 1.8;
-    }
-    if (/[.!?;:]$/.test(text)) {
-      multiplier *= this.settings.micropausePunctuation;
-    } else if (/[,]$/.test(text)) {
-      multiplier *= Math.max(1, this.settings.micropausePunctuation - 0.3);
-    }
-    if (text.length > 8) {
-      multiplier *= this.settings.micropauseLongWords;
-    }
-    if (text.includes("\n")) {
-      multiplier *= this.settings.micropauseParagraph;
-    }
+    const multiplier = this.micropauseService.calculateMultiplier(text);
     return baseDelay * multiplier;
+  }
+  /**
+   * Extract all headings and callouts from the words array
+   * Headings are marked with [H1], [H2], etc.
+   * Callouts are marked with [CALLOUT:type] by the markdown parser
+   *
+   * Since text is split into words, we need to collect all words
+   * that belong to the same heading/callout title.
+   */
+  extractHeadings() {
+    this.headings = [];
+    for (let i = 0; i < this.words.length; i++) {
+      const word = this.words[i];
+      const headingMatch = word.match(/^\[H(\d)\](.+)/);
+      if (headingMatch) {
+        const level = parseInt(headingMatch[1]);
+        const firstWord = headingMatch[2];
+        const titleWords = [firstWord];
+        let j = i + 1;
+        while (j < this.words.length) {
+          const nextWord = this.words[j];
+          if (nextWord === "\xA7\xA7LINEBREAK\xA7\xA7") {
+            break;
+          }
+          if (/^\[H\d\]/.test(nextWord) || /^\[CALLOUT:/.test(nextWord)) {
+            break;
+          }
+          titleWords.push(nextWord);
+          j++;
+          if (titleWords.length >= 20) {
+            break;
+          }
+        }
+        const text = titleWords.join(" ").trim();
+        this.headings.push({
+          level,
+          text,
+          wordIndex: i
+        });
+        continue;
+      }
+      const calloutMatch = word.match(/^\[CALLOUT:([\w-]+)\](.+)/);
+      if (calloutMatch) {
+        const calloutType = calloutMatch[1];
+        const firstWord = calloutMatch[2];
+        const titleWords = [firstWord];
+        let j = i + 1;
+        while (j < this.words.length) {
+          const nextWord = this.words[j];
+          if (nextWord === "\xA7\xA7LINEBREAK\xA7\xA7") {
+            break;
+          }
+          if (/^\[H\d\]/.test(nextWord) || /^\[CALLOUT:/.test(nextWord)) {
+            break;
+          }
+          titleWords.push(nextWord);
+          j++;
+          if (titleWords.length >= 20) {
+            break;
+          }
+        }
+        const text = titleWords.join(" ").trim();
+        this.headings.push({
+          level: 0,
+          // Special level for callouts
+          text,
+          wordIndex: i,
+          calloutType
+        });
+      }
+    }
+  }
+  /**
+   * Get the current heading context (breadcrumb) for a given word index
+   * Returns the hierarchical path of headings leading to the current position
+   *
+   * @param wordIndex - Word index to get context for
+   * @returns Heading context with breadcrumb path and current heading
+   */
+  getCurrentHeadingContext(wordIndex) {
+    if (this.headings.length === 0) {
+      return { breadcrumb: [], current: null };
+    }
+    const relevantHeadings = this.headings.filter((h) => h.wordIndex <= wordIndex);
+    if (relevantHeadings.length === 0) {
+      return { breadcrumb: [], current: null };
+    }
+    const breadcrumb = [];
+    let currentLevel = 0;
+    for (const heading of relevantHeadings) {
+      if (heading.level <= currentLevel) {
+        while (breadcrumb.length > 0 && breadcrumb[breadcrumb.length - 1].level >= heading.level) {
+          breadcrumb.pop();
+        }
+      }
+      breadcrumb.push(heading);
+      currentLevel = heading.level;
+    }
+    return {
+      breadcrumb,
+      current: breadcrumb[breadcrumb.length - 1] || null
+    };
   }
   getProgress() {
     return this.words.length > 0 ? this.currentIndex / this.words.length * 100 : 0;
@@ -235,6 +469,7 @@ var RSVPEngine = class {
   }
   updateSettings(settings) {
     this.settings = settings;
+    this.micropauseService.updateSettings(settings);
   }
   getEstimatedDuration() {
     if (this.words.length === 0)
@@ -252,35 +487,7 @@ var RSVPEngine = class {
     const baseDelay = 60 / wpm * 1e3;
     for (let i = this.currentIndex; i < this.words.length; i++) {
       const word = this.words[i];
-      if (!this.settings.enableMicropause) {
-        totalTimeMs += baseDelay;
-        continue;
-      }
-      let multiplier = 1;
-      const trimmedText = word.trim();
-      const headingMatch = trimmedText.match(/^\[H(\d)\]/);
-      if (headingMatch) {
-        const level = parseInt(headingMatch[1]);
-        const headingMultipliers = [0, 3, 2.5, 2, 1.8, 1.5, 1.3];
-        multiplier *= headingMultipliers[level] || 2;
-      }
-      if (/^(\d+\.|[IVXLCDM]+\.|\w\.)/.test(trimmedText)) {
-        multiplier *= 2;
-      }
-      if (/^[-*+•]/.test(trimmedText)) {
-        multiplier *= 1.8;
-      }
-      if (/[.!?;:]$/.test(word)) {
-        multiplier *= this.settings.micropausePunctuation;
-      } else if (/[,]$/.test(word)) {
-        multiplier *= Math.max(1, this.settings.micropausePunctuation - 0.3);
-      }
-      if (word.length > 8) {
-        multiplier *= this.settings.micropauseLongWords;
-      }
-      if (word.includes("\n")) {
-        multiplier *= this.settings.micropauseParagraph;
-      }
+      const multiplier = this.micropauseService.calculateMultiplier(word);
       totalTimeMs += baseDelay * multiplier;
     }
     return Math.ceil(totalTimeMs / 1e3);
@@ -303,6 +510,13 @@ var RSVPEngine = class {
   getCurrentWpmPublic() {
     return this.getCurrentWpm();
   }
+  /**
+   * Returns all headings extracted from the document
+   * Useful for navigation and section counting
+   */
+  getHeadings() {
+    return this.headings;
+  }
 };
 
 // src/markdown-parser.ts
@@ -310,11 +524,16 @@ var MarkdownParser = class {
   static parseToPlainText(markdown) {
     let text = markdown;
     text = text.replace(/^---[\s\S]*?---\n?/m, "");
-    text = text.replace(/```[\w-]*\n?([\s\S]*?)```/g, "$1");
+    const codeBlocks = [];
+    text = text.replace(/```[\w-]*\n?([\s\S]*?)```/g, (_match, code) => {
+      const index = codeBlocks.length;
+      codeBlocks.push(code);
+      return `___CODE_BLOCK_${index}___`;
+    });
     text = text.replace(/`([^`]+)`/g, "$1");
     text = text.replace(/!\[([^\]]*)\]\([^\)]+\)/g, "");
     text = text.replace(/\[([^\]]+)\]\([^\)]+\)/g, "$1");
-    text = text.replace(/\[\[([^\]|]+)(\|([^\]]+))?\]\]/g, (match, link, pipe, alias) => {
+    text = text.replace(/\[\[([^\]|]+)(\|([^\]]+))?\]\]/g, (_match, link, _pipe, alias) => {
       return alias || link;
     });
     text = text.replace(/\*\*\*([^\*]+)\*\*\*/g, "$1");
@@ -324,11 +543,14 @@ var MarkdownParser = class {
     text = text.replace(/_([^_\n]+)_/g, "$1");
     text = text.replace(/~~([^~]+)~~/g, "$1");
     text = text.replace(/==([^=]+)==/g, "$1");
-    text = text.replace(/^(#{1,6})\s+(.+)$/gm, (match, hashes, content) => {
+    text = text.replace(/^(#{1,6})\s+(.+)$/gm, (_match, hashes, content) => {
       const level = hashes.length;
       return `[H${level}]${content}`;
     });
-    text = text.replace(/^>\s*\[![\w-]+\].*$/gm, "");
+    text = text.replace(/^>\s*\[!([\w-]+)\]\s*(.*)$/gm, (_match, type, title) => {
+      const displayTitle = title.trim() || type;
+      return `[CALLOUT:${type}]${displayTitle}`;
+    });
     text = text.replace(/^>\s*/gm, "");
     text = text.replace(/^[\s]*[-*+]\s+/gm, "");
     text = text.replace(/^[\s]*\d+\.\s+/gm, "");
@@ -343,6 +565,9 @@ var MarkdownParser = class {
     text = text.replace(/\n{3,}/g, "\n\n");
     text = text.replace(/^[ \t]+/gm, "");
     text = text.replace(/[ \t]+$/gm, "");
+    text = text.replace(/___CODE_BLOCK_(\d+)___/g, (_match, index) => {
+      return codeBlocks[parseInt(index)] || "";
+    });
     text = text.trim();
     return text;
   }
@@ -354,616 +579,2630 @@ var MarkdownParser = class {
   }
 };
 
+// src/view-state.ts
+var DEFAULT_VIEW_STATE = {
+  wordsRead: 0,
+  startTime: 0,
+  showingControls: false,
+  showingSettings: false,
+  showingStats: false,
+  currentWpm: 0,
+  currentChunkSize: 0,
+  currentFontSize: 0,
+  isLoading: false
+};
+var ViewState = class {
+  /**
+   * Creates a new ViewState instance
+   *
+   * @param initialState - Optional partial state to merge with defaults
+   *
+   * @example
+   * ```typescript
+   * // Default state
+   * const state = new ViewState();
+   *
+   * // With initial values
+   * const state = new ViewState({
+   *   currentWpm: 300,
+   *   showingControls: true
+   * });
+   * ```
+   */
+  constructor(initialState = {}) {
+    this.listeners = /* @__PURE__ */ new Set();
+    this.state = { ...DEFAULT_VIEW_STATE, ...initialState };
+  }
+  /**
+   * Get a state value (type-safe)
+   *
+   * Uses TypeScript generics to ensure return type matches the requested key.
+   *
+   * @param key - State property to get
+   * @returns Current value of the property
+   *
+   * @example
+   * ```typescript
+   * const wpm: number = state.get('currentWpm');
+   * const showing: boolean = state.get('showingControls');
+   * ```
+   */
+  get(key) {
+    return this.state[key];
+  }
+  /**
+   * Set a state value and notify listeners (type-safe)
+   *
+   * Updates the state property and notifies all subscribers if the value changed.
+   * Automatically skips notification if the new value equals the old value.
+   *
+   * @param key - State property to set
+   * @param value - New value for the property
+   *
+   * @example
+   * ```typescript
+   * state.set('currentWpm', 350);
+   * state.set('showingControls', true);
+   * state.set('loadedFileName', 'My Note.md');
+   * ```
+   */
+  set(key, value) {
+    const oldValue = this.state[key];
+    if (oldValue === value)
+      return;
+    this.state[key] = value;
+    this.notify(key, value, oldValue);
+  }
+  /**
+   * Update multiple state values at once (batch update)
+   *
+   * Efficiently updates multiple properties in a single call. Each changed
+   * property will trigger its own notification to listeners.
+   *
+   * @param updates - Partial state object with properties to update
+   *
+   * @example
+   * ```typescript
+   * state.update({
+   *   currentWpm: 350,
+   *   showingControls: true,
+   *   wordsRead: 42
+   * });
+   * ```
+   */
+  update(updates) {
+    Object.entries(updates).forEach(([key, value]) => {
+      this.set(key, value);
+    });
+  }
+  /**
+   * Reset all state to default values
+   *
+   * Sets every state property back to its default value from DEFAULT_VIEW_STATE.
+   * Each reset property triggers a notification to listeners.
+   *
+   * @example
+   * ```typescript
+   * // After reading session, reset to defaults
+   * state.reset();
+   * ```
+   */
+  reset() {
+    Object.entries(DEFAULT_VIEW_STATE).forEach(([key, value]) => {
+      this.set(key, value);
+    });
+  }
+  /**
+   * Subscribe to state changes (observer pattern)
+   *
+   * Registers a listener function that will be called whenever any state
+   * property changes. Returns an unsubscribe function for cleanup.
+   *
+   * **Error Handling**: Listener errors are caught and logged to prevent
+   * one broken listener from breaking all listeners.
+   *
+   * @param listener - Callback function to call on state changes
+   * @returns Unsubscribe function to remove the listener
+   *
+   * @example
+   * ```typescript
+   * // Subscribe and get unsubscribe function
+   * const unsubscribe = state.subscribe((key, value, oldValue) => {
+   *   if (key === 'currentWpm') {
+   *     console.log(`WPM changed from ${oldValue} to ${value}`);
+   *   }
+   * });
+   *
+   * // Later, cleanup
+   * unsubscribe();
+   * ```
+   */
+  subscribe(listener) {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+  /**
+   * Notify all listeners of a state change (internal)
+   *
+   * Calls each registered listener with the changed property details.
+   * Catches and logs errors to prevent one broken listener from affecting others.
+   *
+   * @param key - Name of the property that changed
+   * @param value - New value of the property
+   * @param oldValue - Previous value of the property
+   *
+   * @private
+   */
+  notify(key, value, oldValue) {
+    this.listeners.forEach((listener) => {
+      try {
+        listener(key, value, oldValue);
+      } catch (error) {
+        console.error("DashReader: Error in state listener", error);
+      }
+    });
+  }
+  /**
+   * Get all state as a plain object (for debugging)
+   *
+   * Returns a shallow copy of the entire state object. Useful for logging
+   * or debugging state issues.
+   *
+   * @returns Readonly copy of the full state
+   *
+   * @example
+   * ```typescript
+   * console.log('Current state:', state.getAll());
+   * // Output: { wordsRead: 42, currentWpm: 350, showingControls: true, ... }
+   * ```
+   */
+  getAll() {
+    return { ...this.state };
+  }
+  /**
+   * Toggle a boolean state value (helper)
+   *
+   * Convenience method for toggling boolean properties. Flips the value
+   * from true to false or false to true.
+   *
+   * @param key - Boolean property to toggle (showingControls, showingSettings, showingStats, isLoading)
+   *
+   * @example
+   * ```typescript
+   * // Toggle control panel visibility
+   * state.toggle('showingControls');
+   *
+   * // Toggle settings panel
+   * state.toggle('showingSettings');
+   * ```
+   */
+  toggle(key) {
+    const currentValue = this.get(key);
+    this.set(key, !currentValue);
+  }
+  /**
+   * Increment a numeric state value (helper)
+   *
+   * Convenience method for incrementing numeric properties. Can add positive
+   * or negative deltas.
+   *
+   * @param key - Numeric property to increment (currently only wordsRead)
+   * @param delta - Amount to add (default: 1, can be negative)
+   *
+   * @example
+   * ```typescript
+   * // Increment words read by 1
+   * state.increment('wordsRead');
+   *
+   * // Increment by 5
+   * state.increment('wordsRead', 5);
+   *
+   * // Decrement by 1
+   * state.increment('wordsRead', -1);
+   * ```
+   */
+  increment(key, delta = 1) {
+    const currentValue = this.get(key);
+    this.set(key, currentValue + delta);
+  }
+};
+
+// src/constants.ts
+var CSS_CLASSES = {
+  // Main container
+  container: "dashreader-container",
+  // Toggle bar
+  toggleBar: "dashreader-toggle-bar",
+  toggleBtn: "dashreader-toggle-btn",
+  // Display area
+  display: "dashreader-display",
+  word: "dashreader-word",
+  welcome: "dashreader-welcome",
+  highlight: "dashreader-highlight",
+  // Context
+  contextBefore: "dashreader-context-before",
+  contextAfter: "dashreader-context-after",
+  // Progress
+  progressContainer: "dashreader-progress-container",
+  progressBar: "dashreader-progress-bar",
+  // Controls
+  controls: "dashreader-controls",
+  controlGroup: "dashreader-control-group",
+  controlLabel: "control-label",
+  // Settings
+  settings: "dashreader-settings",
+  settingGroup: "dashreader-setting-group",
+  settingLabel: "setting-label",
+  settingToggle: "setting-toggle",
+  // Stats
+  stats: "dashreader-stats",
+  statsText: "dashreader-stats-text",
+  wpmDisplay: "dashreader-wpm-display",
+  // Buttons
+  btn: "dashreader-btn",
+  playBtn: "play-btn",
+  pauseBtn: "pause-btn",
+  smallBtn: "small-btn",
+  // Value displays
+  wpmValue: "wpm-value",
+  wpmInlineValue: "wpm-inline-value",
+  chunkValue: "chunk-value",
+  fontValue: "font-value",
+  accelDurationValue: "accel-duration-value",
+  accelTargetValue: "accel-target-value",
+  // State classes
+  hidden: "hidden"
+};
+var TIMING = {
+  /** Delay before auto-loading content from editor (file-open event) */
+  autoLoadDelay: 300,
+  /** Shorter delay for leaf-change events (editor already active) */
+  autoLoadDelayShort: 200,
+  /** Very short delay for immediate operations */
+  autoLoadDelayVeryShort: 50,
+  /** Throttle interval for cursor/selection checks (prevents excessive checks) */
+  throttleDelay: 150,
+  /** CSS transition duration for smooth animations */
+  transitionDuration: 300
+};
+var TEXT_LIMITS = {
+  /** Minimum characters in selection to trigger auto-load */
+  minSelectionLength: 30,
+  /** Minimum characters in full document to load */
+  minContentLength: 50,
+  /** Minimum words in parsed text to display */
+  minParsedLength: 10
+};
+var INCREMENTS = {
+  /** WPM increment (25 = noticeable speed change) */
+  wpm: 25,
+  /** Chunk size increment (1 word at a time) */
+  chunkSize: 1,
+  /** Font size increment in pixels (4px = visible change) */
+  fontSize: 4,
+  /** Acceleration duration increment in seconds */
+  accelDuration: 5
+};
+var LIMITS = {
+  /** Font size range in pixels (20 = readable minimum, 120 = fills viewport) */
+  fontSize: { min: 20, max: 120 },
+  /** WPM range (50 = very slow, 5000 = ultra-fast speed reading limit) */
+  wpm: { min: 50, max: 5e3 },
+  /** Acceleration duration in seconds (10 = quick ramp, 120 = gradual) */
+  accelDuration: { min: 10, max: 120 }
+};
+var ICONS = {
+  /** Rewind to start button */
+  rewind: "\u23EE",
+  /** Play button */
+  play: "\u25B6",
+  /** Pause button */
+  pause: "\u23F8",
+  /** Skip forward button */
+  forward: "\u23ED",
+  /** Stop button */
+  stop: "\u23F9",
+  /** Increment (+) button */
+  increment: "+",
+  /** Decrement (−) button (using minus sign, not hyphen) */
+  decrement: "\u2212",
+  /** Settings toggle button */
+  settings: "\u2699\uFE0F",
+  /** Statistics toggle button */
+  stats: "\u{1F4CA}",
+  /** File/document indicator */
+  file: "\u{1F4C4}",
+  /** Celebration (reading complete) */
+  celebration: "\u{1F389}",
+  /** Book/reading indicator */
+  book: "\u{1F4D6}",
+  /** Expand to new tab */
+  expand: "\u2922"
+};
+var HEADING_MULTIPLIERS = {
+  /** H1 heading multiplier (1.5x base font = major section) */
+  h1: 1.5,
+  /** H2 heading multiplier (1.3x base font) */
+  h2: 1.3,
+  /** H3 heading multiplier (1.2x base font) */
+  h3: 1.2,
+  /** H4 heading multiplier (1.1x base font) */
+  h4: 1.1,
+  /** H5 heading multiplier (1.05x base font) */
+  h5: 1.05,
+  /** H6 heading multiplier (1x base font = same as body text) */
+  h6: 1
+};
+
+// src/dom-registry.ts
+var DOMRegistry = class {
+  constructor() {
+    this.elements = /* @__PURE__ */ new Map();
+  }
+  /**
+   * Register a DOM element by key
+   *
+   * Stores an element reference for later retrieval and updates. Should be
+   * called once per element during UI construction.
+   *
+   * @param key - Type-safe key for the element (from DOMElementKey union)
+   * @param element - HTMLElement to store
+   *
+   * @example
+   * ```typescript
+   * const wpmValue = controlGroup.createSpan({ cls: CSS_CLASSES.wpmValue });
+   * this.dom.register('wpmValue', wpmValue);
+   * ```
+   */
+  register(key, element) {
+    this.elements.set(key, element);
+  }
+  /**
+   * Get a registered DOM element
+   *
+   * Retrieves the stored element reference. Returns undefined if the key
+   * was never registered.
+   *
+   * @param key - Key of the element to retrieve
+   * @returns The HTMLElement if registered, undefined otherwise
+   *
+   * @example
+   * ```typescript
+   * const wpmEl = this.dom.get('wpmValue');
+   * if (wpmEl) {
+   *   // Do something with the element
+   * }
+   * ```
+   */
+  get(key) {
+    return this.elements.get(key);
+  }
+  /**
+   * Update text content of a registered element (XSS-safe)
+   *
+   * Uses Obsidian's setText() method which safely escapes HTML.
+   * Preferred over updateHTML() for displaying user-generated content.
+   *
+   * @param key - Key of the element to update
+   * @param text - Text content to set (string or number)
+   *
+   * @example
+   * ```typescript
+   * this.dom.updateText('wpmValue', 350);
+   * this.dom.updateText('statsText', 'Words: 42 / 1000');
+   * ```
+   */
+  updateText(key, text) {
+    const element = this.elements.get(key);
+    if (element) {
+      element.setText(String(text));
+    }
+  }
+  /**
+   * @deprecated REMOVED for Obsidian security compliance.
+   *
+   * Using innerHTML with any content is discouraged by Obsidian plugin guidelines.
+   * Instead, use DOM API methods to build HTML structures:
+   * - element.createEl(), element.createSpan(), element.createDiv()
+   * - element.setText() for text content (automatically escapes)
+   * - element.empty() to clear contents
+   *
+   * See: https://docs.obsidian.md/Plugins/Releasing/Plugin+guidelines
+   *
+   * Migration example:
+   * ```typescript
+   * // OLD (unsafe):
+   * this.dom.updateHTML('wordEl', `<span class="highlight">${word}</span>`);
+   *
+   * // NEW (safe):
+   * const element = this.dom.get('wordEl');
+   * element.empty();
+   * element.createSpan({ text: word, cls: 'highlight' });
+   * ```
+   */
+  /**
+   * Update a CSS style property of a registered element
+   *
+   * Modifies inline styles. Useful for dynamic styling like font size,
+   * colors, or positioning.
+   *
+   * @param key - Key of the element to update
+   * @param property - CSS property name (camelCase, e.g., 'fontSize')
+   * @param value - CSS value as string (e.g., '48px', '#ff0000')
+   *
+   * @example
+   * ```typescript
+   * this.dom.updateStyle('wordEl', 'fontSize', '48px');
+   * this.dom.updateStyle('wordEl', 'color', '#ff0000');
+   * this.dom.updateStyle('progressBar', 'width', '50%');
+   * ```
+   */
+  updateStyle(key, property, value) {
+    const element = this.elements.get(key);
+    if (element) {
+      element.style.setProperty(property, value);
+    }
+  }
+  /**
+   * Toggle CSS class on a registered element
+   *
+   * Conditionally adds or removes a CSS class. Commonly used for show/hide
+   * functionality with CSS_CLASSES.hidden.
+   *
+   * @param key - Key of the element to update
+   * @param className - CSS class name to toggle
+   * @param force - True to add class, false to remove it
+   *
+   * @example
+   * ```typescript
+   * // Show controls (remove 'hidden' class)
+   * this.dom.toggleClass('controlsEl', CSS_CLASSES.hidden, false);
+   *
+   * // Hide controls (add 'hidden' class)
+   * this.dom.toggleClass('controlsEl', CSS_CLASSES.hidden, true);
+   * ```
+   */
+  toggleClass(key, className, force) {
+    const element = this.elements.get(key);
+    if (element) {
+      element.toggleClass(className, force);
+    }
+  }
+  /**
+   * Add CSS class to a registered element
+   *
+   * Adds a CSS class if not already present. Use for state changes like
+   * highlighting, active states, etc.
+   *
+   * @param key - Key of the element to update
+   * @param className - CSS class name to add
+   *
+   * @example
+   * ```typescript
+   * this.dom.addClass('playBtn', 'active');
+   * this.dom.addClass('wordEl', CSS_CLASSES.highlight);
+   * ```
+   */
+  addClass(key, className) {
+    const element = this.elements.get(key);
+    if (element) {
+      element.classList.add(className);
+    }
+  }
+  /**
+   * Remove CSS class from a registered element
+   *
+   * Removes a CSS class if present. Use for removing state classes.
+   *
+   * @param key - Key of the element to update
+   * @param className - CSS class name to remove
+   *
+   * @example
+   * ```typescript
+   * this.dom.removeClass('playBtn', 'active');
+   * this.dom.removeClass('wordEl', CSS_CLASSES.highlight);
+   * ```
+   */
+  removeClass(key, className) {
+    const element = this.elements.get(key);
+    if (element) {
+      element.classList.remove(className);
+    }
+  }
+  /**
+   * Empty the content of a registered element
+   *
+   * Removes all child nodes and text content. Useful for clearing containers
+   * before re-rendering.
+   *
+   * @param key - Key of the element to empty
+   *
+   * @example
+   * ```typescript
+   * // Clear the word display before loading new text
+   * this.dom.empty('wordEl');
+   * ```
+   */
+  empty(key) {
+    const element = this.elements.get(key);
+    if (element) {
+      element.empty();
+    }
+  }
+  /**
+   * Check if an element is registered
+   *
+   * Returns true if an element with the given key has been registered.
+   *
+   * @param key - Key to check
+   * @returns True if the key is registered, false otherwise
+   *
+   * @example
+   * ```typescript
+   * if (this.dom.has('statsEl')) {
+   *   this.dom.updateText('statsEl', 'New stats');
+   * }
+   * ```
+   */
+  has(key) {
+    return this.elements.has(key);
+  }
+  /**
+   * Clear all registered elements
+   *
+   * Removes all element references from the registry. Typically used during
+   * cleanup or when rebuilding the entire UI.
+   *
+   * @example
+   * ```typescript
+   * // During onunload
+   * this.dom.clear();
+   * ```
+   */
+  clear() {
+    this.elements.clear();
+  }
+  /**
+   * Update multiple text elements at once (batch update)
+   *
+   * Efficiently updates text content of multiple elements in a single call.
+   * More readable than multiple individual updateText() calls.
+   *
+   * @param updates - Object mapping element keys to new text values
+   *
+   * @example
+   * ```typescript
+   * // Update all WPM displays at once
+   * this.dom.updateMultipleText({
+   *   wpmDisplay: `${wpm} WPM`,
+   *   wpmValue: String(wpm),
+   *   wpmInlineValue: String(wpm)
+   * });
+   *
+   * // Update stats panel
+   * this.dom.updateMultipleText({
+   *   statsText: `Words: ${wordsRead} / ${totalWords}`,
+   *   progressBar: `${percent}%`
+   * });
+   * ```
+   */
+  updateMultipleText(updates) {
+    Object.entries(updates).forEach(([key, value]) => {
+      if (value !== void 0) {
+        this.updateText(key, value);
+      }
+    });
+  }
+  /**
+   * Toggle visibility of multiple elements (batch visibility)
+   *
+   * Efficiently shows or hides multiple elements using CSS_CLASSES.hidden.
+   * More readable than multiple individual toggleClass() calls.
+   *
+   * @param toggles - Object mapping element keys to visibility booleans (true = visible, false = hidden)
+   *
+   * @example
+   * ```typescript
+   * // Show play button, hide pause button
+   * this.dom.toggleMultipleVisibility({
+   *   playBtn: true,
+   *   pauseBtn: false
+   * });
+   *
+   * // Hide all panels
+   * this.dom.toggleMultipleVisibility({
+   *   controlsEl: false,
+   *   settingsEl: false,
+   *   statsEl: false
+   * });
+   * ```
+   */
+  toggleMultipleVisibility(toggles) {
+    Object.entries(toggles).forEach(([key, visible]) => {
+      if (typeof visible === "boolean") {
+        this.toggleClass(key, CSS_CLASSES.hidden, !visible);
+      }
+    });
+  }
+};
+
+// src/menu-builder.ts
+var MenuBuilder = class {
+  /**
+   * Creates a dropdown menu near an anchor element
+   *
+   * @param options - Menu configuration
+   * @returns The created menu element
+   */
+  static createMenu(options) {
+    const {
+      anchorEl,
+      cssClass,
+      title,
+      items,
+      onItemClick,
+      showLevel = false,
+      indentByLevel = false,
+      timeoutManager
+    } = options;
+    const menu = document.body.createDiv({ cls: cssClass });
+    const anchorRect = anchorEl.getBoundingClientRect();
+    menu.style.top = `${anchorRect.bottom + 5}px`;
+    if (cssClass.includes("heading-menu")) {
+      const menuWidth = 300;
+      const centerLeft = anchorRect.left + (anchorRect.width - menuWidth) / 2;
+      const viewportWidth = window.innerWidth;
+      const finalLeft = Math.max(10, Math.min(centerLeft, viewportWidth - menuWidth - 10));
+      menu.style.left = `${finalLeft}px`;
+    } else {
+      menu.style.left = `${anchorRect.left}px`;
+    }
+    if (title) {
+      menu.createDiv({
+        text: title,
+        cls: "dashreader-menu-title"
+      });
+    }
+    items.forEach((item, index) => {
+      const menuItem = menu.createDiv({
+        cls: item.isCurrent ? "dashreader-menu-item dashreader-menu-item-current" : "dashreader-menu-item"
+      });
+      if (indentByLevel && item.level) {
+        const indent = (item.level - 1) * 16;
+        menuItem.style.paddingLeft = item.isCurrent ? `${8 + indent - 3}px` : `${8 + indent}px`;
+      }
+      if (showLevel && item.level) {
+        menuItem.createSpan({
+          text: `H${item.level}`,
+          cls: "dashreader-outline-level"
+        });
+      } else if (!showLevel) {
+        menuItem.createSpan({
+          text: `${index + 1}.`,
+          cls: "dashreader-outline-level"
+        });
+      }
+      menuItem.createSpan({
+        text: item.text,
+        cls: "dashreader-outline-text"
+      });
+      menuItem.addEventListener("click", () => {
+        onItemClick(item.wordIndex);
+        menu.remove();
+      });
+    });
+    const closeMenu = (e) => {
+      if (!menu.contains(e.target)) {
+        menu.remove();
+        document.removeEventListener("click", closeMenu);
+      }
+    };
+    timeoutManager.setTimeout(() => {
+      document.addEventListener("click", closeMenu);
+    }, 10);
+    return menu;
+  }
+  /**
+   * Scrolls to the current item in the menu (for outline menu)
+   *
+   * @param menu - The menu element
+   * @param timeoutManager - Timeout manager for proper cleanup
+   */
+  static scrollToCurrentItem(menu, timeoutManager) {
+    timeoutManager.setTimeout(() => {
+      const currentItem = menu.querySelector(".dashreader-menu-item-current");
+      if (currentItem) {
+        currentItem.scrollIntoView({ block: "center" });
+      }
+    }, 10);
+  }
+};
+
+// src/breadcrumb-manager.ts
+var BreadcrumbManager = class {
+  constructor(breadcrumbEl, engine, timeoutManager) {
+    this.lastHeadingContext = null;
+    /**
+     * Callout icon mapping (consistent with WordDisplay)
+     */
+    this.calloutIcons = {
+      note: "\u{1F4DD}",
+      abstract: "\u{1F4C4}",
+      info: "\u2139\uFE0F",
+      tip: "\u{1F4A1}",
+      success: "\u2705",
+      question: "\u2753",
+      warning: "\u26A0\uFE0F",
+      failure: "\u274C",
+      danger: "\u26A1",
+      bug: "\u{1F41B}",
+      example: "\u{1F4CB}",
+      quote: "\u{1F4AC}"
+    };
+    this.breadcrumbEl = breadcrumbEl;
+    this.engine = engine;
+    this.timeoutManager = timeoutManager;
+  }
+  /**
+   * Updates the breadcrumb navigation bar with current heading context
+   * Shows hierarchical path (H1 > H2 > H3) and makes it clickable for navigation
+   *
+   * @param context - Current heading context from engine
+   */
+  updateBreadcrumb(context) {
+    if (!context || context.breadcrumb.length === 0) {
+      this.breadcrumbEl.toggleClass(CSS_CLASSES.hidden, true);
+      return;
+    }
+    this.breadcrumbEl.toggleClass(CSS_CLASSES.hidden, false);
+    this.breadcrumbEl.empty();
+    this.breadcrumbEl.createSpan({
+      text: "\u{1F4D1}",
+      cls: "dashreader-breadcrumb-icon"
+    });
+    context.breadcrumb.forEach((heading, index) => {
+      if (index > 0) {
+        this.breadcrumbEl.createSpan({
+          text: "\u203A",
+          cls: "dashreader-breadcrumb-separator"
+        });
+      }
+      const itemSpan = this.breadcrumbEl.createSpan({
+        cls: "dashreader-breadcrumb-item"
+      });
+      const calloutMatch = heading.text.match(/^\[CALLOUT:([\w-]+)\]/);
+      let displayText = heading.text;
+      let icon = "";
+      if (calloutMatch) {
+        const calloutType = calloutMatch[1];
+        icon = this.calloutIcons[calloutType.toLowerCase()] || "\u{1F4CC}";
+        displayText = heading.text.replace(/^\[CALLOUT:[\w-]+\]/, "").trim();
+      }
+      itemSpan.textContent = icon ? `${icon} ${displayText}` : displayText;
+      itemSpan.addEventListener("click", () => {
+        this.navigateToHeading(heading.wordIndex);
+      });
+    });
+    const dropdown = this.breadcrumbEl.createSpan({
+      text: "\u25BC",
+      cls: "dashreader-breadcrumb-dropdown"
+    });
+    dropdown.addEventListener("click", () => {
+      this.showOutlineMenu(dropdown);
+    });
+    this.lastHeadingContext = context;
+  }
+  /**
+   * Closes all open menus (outline menus)
+   * Called before opening a new menu to ensure only one menu is visible
+   */
+  closeAllMenus() {
+    document.querySelectorAll(".dashreader-outline-menu").forEach((menu) => {
+      menu.remove();
+    });
+  }
+  /**
+   * Checks if heading context has changed (to avoid unnecessary updates)
+   *
+   * @param newContext - New heading context to check
+   * @returns True if context has changed, false otherwise
+   */
+  hasHeadingContextChanged(newContext) {
+    if (!this.lastHeadingContext)
+      return true;
+    if (this.lastHeadingContext.breadcrumb.length !== newContext.breadcrumb.length) {
+      return true;
+    }
+    for (let i = 0; i < newContext.breadcrumb.length; i++) {
+      if (this.lastHeadingContext.breadcrumb[i].wordIndex !== newContext.breadcrumb[i].wordIndex) {
+        return true;
+      }
+    }
+    return false;
+  }
+  /**
+   * Shows outline menu with all headings in the document
+   * Displays complete document structure with indentation by level
+   * Highlights current position in the list
+   *
+   * @param anchorEl - The element to position the menu relative to
+   */
+  showOutlineMenu(anchorEl) {
+    this.closeAllMenus();
+    const allHeadings = this.engine.getHeadings();
+    if (allHeadings.length === 0) {
+      return;
+    }
+    const currentIndex = this.engine.getCurrentIndex();
+    const relevantHeadings = allHeadings.filter((h) => h.wordIndex <= currentIndex);
+    const currentHeading = relevantHeadings.length > 0 ? relevantHeadings[relevantHeadings.length - 1] : null;
+    const menu = MenuBuilder.createMenu({
+      anchorEl,
+      cssClass: "dashreader-outline-menu",
+      title: "Document Outline",
+      items: allHeadings.map((h) => ({
+        text: h.text,
+        wordIndex: h.wordIndex,
+        level: h.level,
+        isCurrent: currentHeading ? h.wordIndex === currentHeading.wordIndex : false
+      })),
+      onItemClick: (wordIndex) => this.navigateToHeading(wordIndex),
+      showLevel: true,
+      indentByLevel: true,
+      timeoutManager: this.timeoutManager
+    });
+    if (currentHeading) {
+      MenuBuilder.scrollToCurrentItem(menu, this.timeoutManager);
+    }
+  }
+  /**
+   * Navigates to a specific heading by word index
+   * Pauses playback, jumps to the heading position, and resumes if it was playing
+   *
+   * @param wordIndex - Word index to navigate to
+   */
+  navigateToHeading(wordIndex) {
+    const wasPlaying = this.engine.getIsPlaying();
+    if (wasPlaying) {
+      this.engine.pause();
+    }
+    const currentIndex = this.engine.getCurrentIndex();
+    const delta = wordIndex - currentIndex;
+    if (delta < 0) {
+      this.engine.rewind(Math.abs(delta));
+    } else if (delta > 0) {
+      this.engine.forward(delta);
+    }
+    if (wasPlaying) {
+      this.engine.play();
+    }
+  }
+  /**
+   * Resets the breadcrumb state (for new text loading)
+   */
+  reset() {
+    this.lastHeadingContext = null;
+  }
+};
+
+// src/word-display.ts
+var WordDisplay = class {
+  constructor(wordEl, settings) {
+    /**
+     * Callout icon mapping
+     */
+    this.calloutIcons = {
+      note: "\u{1F4DD}",
+      abstract: "\u{1F4C4}",
+      info: "\u2139\uFE0F",
+      tip: "\u{1F4A1}",
+      success: "\u2705",
+      question: "\u2753",
+      warning: "\u26A0\uFE0F",
+      failure: "\u274C",
+      danger: "\u26A1",
+      bug: "\u{1F41B}",
+      example: "\u{1F4CB}",
+      quote: "\u{1F4AC}"
+    };
+    this.wordEl = wordEl;
+    this.settings = settings;
+  }
+  /**
+   * Updates settings (when user changes font size, etc.)
+   *
+   * @param settings - New settings to apply
+   */
+  updateSettings(settings) {
+    this.settings = settings;
+  }
+  /**
+   * Displays a word with optional heading level or callout type
+   * Handles font size adjustment, icons, and separators
+   *
+   * @param word - The word to display
+   * @param headingLevel - Heading level (1-6) or 0 for normal text/callouts
+   * @param showSeparator - Whether to show separator line before heading/callout
+   * @param calloutType - Callout type (note, abstract, info, etc.) if this is a callout
+   */
+  displayWord(word, headingLevel, showSeparator = false, calloutType) {
+    let fontSizeMultiplier = 1;
+    let fontWeight = "normal";
+    let iconPrefix = "";
+    if (calloutType) {
+      fontSizeMultiplier = 1.2;
+      fontWeight = "bold";
+      iconPrefix = this.calloutIcons[calloutType.toLowerCase()] || "\u{1F4CC}";
+    } else if (headingLevel > 0) {
+      const multipliers = [
+        0,
+        HEADING_MULTIPLIERS.h1,
+        HEADING_MULTIPLIERS.h2,
+        HEADING_MULTIPLIERS.h3,
+        HEADING_MULTIPLIERS.h4,
+        HEADING_MULTIPLIERS.h5,
+        HEADING_MULTIPLIERS.h6
+      ];
+      fontSizeMultiplier = multipliers[headingLevel] || 1;
+      fontWeight = "bold";
+    }
+    const adjustedFontSize = this.settings.fontSize * fontSizeMultiplier;
+    this.wordEl.empty();
+    if (showSeparator) {
+      this.wordEl.createDiv({ cls: "dashreader-heading-separator" });
+    }
+    const wordContainer = this.wordEl.createDiv({ cls: "dashreader-word-with-heading" });
+    wordContainer.style.fontSize = `${adjustedFontSize}px`;
+    wordContainer.style.fontWeight = fontWeight;
+    if (iconPrefix) {
+      wordContainer.createSpan({
+        text: iconPrefix,
+        cls: "dashreader-callout-icon"
+      });
+    }
+    this.addProcessedWord(wordContainer, word);
+  }
+  /**
+   * Adds a processed word to the container using DOM API
+   * This prevents XSS attacks by never using innerHTML with user content
+   *
+   * @param container - Container element to add word to
+   * @param rawWord - Raw word (may contain special characters)
+   */
+  addProcessedWord(container, rawWord) {
+    if (rawWord === "\n") {
+      container.createEl("br");
+      return;
+    }
+    const word = rawWord.replace(/^\[H\d\]/, "").replace(/^\[CALLOUT:[\w-]+\]/, "");
+    if (word.length > 0) {
+      const centerIndex = Math.floor(word.length / 3);
+      const before = word.substring(0, centerIndex);
+      const center = word.charAt(centerIndex);
+      const after = word.substring(centerIndex + 1);
+      if (before) {
+        container.createSpan({ text: before });
+      }
+      container.createSpan({
+        text: center,
+        cls: "dashreader-highlight"
+      });
+      if (after) {
+        container.createSpan({ text: after });
+      }
+    } else {
+      container.setText(word);
+    }
+  }
+  /**
+   * Displays a welcome message (no text loaded)
+   * Uses DOM API to build the message instead of innerHTML
+   *
+   * @param icon - Icon to display
+   * @param mainText - Main message text
+   * @param subText - Instruction text
+   */
+  displayWelcomeMessage(icon, mainText, subText) {
+    this.wordEl.empty();
+    const welcomeDiv = this.wordEl.createDiv({ cls: "dashreader-welcome-message" });
+    welcomeDiv.createDiv({
+      text: `${icon} ${mainText}`,
+      cls: "dashreader-welcome-icon"
+    });
+    welcomeDiv.createDiv({
+      text: subText,
+      cls: "dashreader-welcome-instruction"
+    });
+  }
+  /**
+   * Displays a ready message (text loaded, ready to start)
+   * Uses DOM API to build the message instead of innerHTML
+   *
+   * @param wordsToRead - Number of words to read
+   * @param totalWords - Total words in document
+   * @param startIndex - Starting word index (if resuming)
+   * @param durationText - Formatted estimated duration
+   * @param fileName - Optional source file name
+   * @param lineNumber - Optional source line number
+   */
+  displayReadyMessage(wordsToRead, totalWords, startIndex, durationText, fileName, lineNumber) {
+    this.wordEl.empty();
+    const readyDiv = this.wordEl.createDiv({ cls: "dashreader-ready-message" });
+    if (fileName) {
+      const sourceDiv = readyDiv.createDiv({ cls: "dashreader-ready-source" });
+      sourceDiv.createSpan({ text: "\u{1F4C4} " });
+      sourceDiv.createSpan({ text: fileName });
+      if (lineNumber) {
+        sourceDiv.createSpan({ text: ` (line ${lineNumber})` });
+      }
+    }
+    const mainText = readyDiv.createSpan();
+    mainText.createSpan({ text: `Ready to read ${wordsToRead} words` });
+    if (startIndex !== void 0 && startIndex > 0) {
+      const startInfo = mainText.createSpan({ cls: "dashreader-ready-start-info" });
+      startInfo.setText(` (starting at word ${startIndex + 1}/${totalWords})`);
+    }
+    readyDiv.createEl("br");
+    readyDiv.createSpan({
+      text: `Estimated time: ~${durationText}`,
+      cls: "dashreader-ready-duration"
+    });
+    readyDiv.createEl("br");
+    readyDiv.createSpan({
+      text: "Press Shift+Space to start",
+      cls: "dashreader-ready-duration"
+    });
+  }
+  /**
+   * Clears the word display
+   */
+  clear() {
+    this.wordEl.empty();
+  }
+};
+
+// src/hotkey-handler.ts
+var HotkeyHandler = class {
+  constructor(settings, callbacks) {
+    this.settings = settings;
+    this.callbacks = callbacks;
+  }
+  /**
+   * Updates settings (when user changes hotkey preferences)
+   *
+   * @param settings - New settings to apply
+   */
+  updateSettings(settings) {
+    this.settings = settings;
+  }
+  /**
+   * Handles keyboard events
+   * Called from keydown event listener in the view
+   *
+   * @param e - Keyboard event
+   */
+  handleKeyPress(e) {
+    const keyCode = e.code || e.key;
+    if (keyCode === "Space" && e.shiftKey) {
+      e.preventDefault();
+      this.callbacks.onTogglePlay();
+      return;
+    }
+    if (this.isInputFocused()) {
+      return;
+    }
+    if (keyCode === this.settings.hotkeyRewind) {
+      e.preventDefault();
+      this.callbacks.onRewind();
+      return;
+    }
+    if (keyCode === this.settings.hotkeyForward) {
+      e.preventDefault();
+      this.callbacks.onForward();
+      return;
+    }
+    if (keyCode === this.settings.hotkeyIncrementWpm) {
+      e.preventDefault();
+      this.callbacks.onIncrementWpm();
+      return;
+    }
+    if (keyCode === this.settings.hotkeyDecrementWpm) {
+      e.preventDefault();
+      this.callbacks.onDecrementWpm();
+      return;
+    }
+    if (keyCode === this.settings.hotkeyQuit) {
+      e.preventDefault();
+      this.callbacks.onQuit();
+      return;
+    }
+  }
+  /**
+   * Checks if an input element is currently focused
+   * Prevents hotkeys from interfering with typing
+   *
+   * @returns True if input/textarea is focused
+   */
+  isInputFocused() {
+    const activeElement = document.activeElement;
+    if (!activeElement)
+      return false;
+    const tagName = activeElement.tagName.toLowerCase();
+    return tagName === "input" || tagName === "textarea";
+  }
+};
+
+// src/minimap-manager.ts
+var MinimapManager = class {
+  constructor(containerEl, engine, timeoutManager) {
+    this.currentWordIndex = 0;
+    this.totalWords = 0;
+    this.containerEl = containerEl;
+    this.engine = engine;
+    this.timeoutManager = timeoutManager;
+    this.minimapEl = this.containerEl.createDiv({
+      cls: "dashreader-minimap"
+    });
+    this.progressEl = this.minimapEl.createDiv({
+      cls: "dashreader-minimap-progress"
+    });
+    this.minimapEl.createDiv({
+      cls: "dashreader-minimap-line"
+    });
+    this.tooltipEl = document.body.createDiv({
+      cls: "dashreader-minimap-tooltip"
+    });
+  }
+  /**
+   * Render the minimap with heading points
+   * Called when text is loaded or structure changes
+   */
+  render() {
+    if (!this.minimapEl)
+      return;
+    const existingPoints = this.minimapEl.querySelectorAll(".dashreader-minimap-point");
+    existingPoints.forEach((point) => point.remove());
+    const headings = this.engine.getHeadings();
+    this.totalWords = this.engine.getTotalWords();
+    if (headings.length === 0 || this.totalWords === 0) {
+      this.minimapEl.toggleClass(CSS_CLASSES.hidden, true);
+      return;
+    }
+    this.minimapEl.toggleClass(CSS_CLASSES.hidden, false);
+    headings.forEach((heading, index) => {
+      this.createPoint(heading, index);
+    });
+    this.updateCurrentPosition(this.currentWordIndex);
+  }
+  /**
+   * Create a point for a heading
+   */
+  createPoint(heading, index) {
+    const point = this.minimapEl.createDiv({
+      cls: "dashreader-minimap-point"
+    });
+    const percentage = heading.wordIndex / this.totalWords * 100;
+    point.style.top = `${percentage}%`;
+    point.setAttribute("data-level", heading.level.toString());
+    point.setAttribute("data-index", index.toString());
+    point.setAttribute("data-word-index", heading.wordIndex.toString());
+    point.setAttribute("data-heading-text", heading.text);
+    point.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.navigateToHeading(heading.wordIndex);
+    });
+    point.addEventListener("mouseenter", () => {
+      this.showTooltip(heading.text, point);
+    });
+    point.addEventListener("mouseleave", () => {
+      this.hideTooltip();
+    });
+  }
+  /**
+   * Update which point is highlighted as current
+   */
+  updateCurrentPosition(wordIndex) {
+    this.currentWordIndex = wordIndex;
+    if (!this.minimapEl)
+      return;
+    if (this.progressEl && this.totalWords > 0) {
+      const progressPercentage = wordIndex / this.totalWords * 100;
+      this.progressEl.style.height = `${Math.min(100, Math.max(0, progressPercentage))}%`;
+    }
+    const headings = this.engine.getHeadings();
+    if (headings.length === 0)
+      return;
+    const relevantHeadings = headings.filter((h) => h.wordIndex <= wordIndex);
+    const currentHeading = relevantHeadings.length > 0 ? relevantHeadings[relevantHeadings.length - 1] : null;
+    const points = this.minimapEl.querySelectorAll(".dashreader-minimap-point");
+    points.forEach((point) => {
+      const pointWordIndex = parseInt(point.getAttribute("data-word-index") || "0");
+      if (currentHeading && pointWordIndex === currentHeading.wordIndex) {
+        point.classList.add("dashreader-minimap-point-current");
+      } else {
+        point.classList.remove("dashreader-minimap-point-current");
+      }
+    });
+  }
+  /**
+   * Navigate to a specific heading
+   */
+  navigateToHeading(wordIndex) {
+    const wasPlaying = this.engine.getIsPlaying();
+    if (wasPlaying) {
+      this.engine.pause();
+    }
+    const currentIndex = this.engine.getCurrentIndex();
+    const delta = wordIndex - currentIndex;
+    if (delta < 0) {
+      this.engine.rewind(Math.abs(delta));
+    } else if (delta > 0) {
+      this.engine.forward(delta);
+    }
+    if (wasPlaying) {
+      this.timeoutManager.setTimeout(() => {
+        this.engine.play();
+      }, 300);
+    }
+  }
+  /**
+   * Show tooltip with heading text (slides from right)
+   */
+  showTooltip(text, pointEl) {
+    if (!this.tooltipEl)
+      return;
+    const cleanText = text.replace(/^\[H\d\]/, "").replace(/^\[CALLOUT:[\w-]+\]/, "").trim();
+    this.tooltipEl.textContent = cleanText;
+    const pointRect = pointEl.getBoundingClientRect();
+    const tooltipHeight = 32;
+    this.tooltipEl.style.top = `${pointRect.top + pointRect.height / 2 - tooltipHeight / 2}px`;
+    this.tooltipEl.classList.add("visible");
+  }
+  /**
+   * Hide tooltip
+   */
+  hideTooltip() {
+    if (!this.tooltipEl)
+      return;
+    this.tooltipEl.classList.remove("visible");
+  }
+  /**
+   * Show the minimap
+   */
+  show() {
+    if (this.minimapEl) {
+      this.minimapEl.toggleClass(CSS_CLASSES.hidden, false);
+    }
+  }
+  /**
+   * Hide the minimap
+   */
+  hide() {
+    if (this.minimapEl) {
+      this.minimapEl.toggleClass(CSS_CLASSES.hidden, true);
+    }
+  }
+  /**
+   * Clean up
+   */
+  destroy() {
+    if (this.minimapEl) {
+      this.minimapEl.remove();
+    }
+    if (this.tooltipEl) {
+      this.tooltipEl.remove();
+    }
+  }
+};
+
+// src/services/timeout-manager.ts
+var TimeoutManager = class {
+  constructor() {
+    this.timeouts = /* @__PURE__ */ new Map();
+    this.intervals = /* @__PURE__ */ new Map();
+  }
+  /**
+   * Create a timeout that will be automatically tracked
+   *
+   * @param callback - Function to execute after delay
+   * @param delay - Delay in milliseconds
+   * @returns Timeout ID (can be used with clearTimeout)
+   *
+   * @example
+   * ```typescript
+   * const id = this.timeoutManager.setTimeout(() => {
+   *   console.log('Hello!');
+   * }, 1000);
+   * ```
+   */
+  setTimeout(callback, delay) {
+    const id = window.setTimeout(() => {
+      callback();
+      this.timeouts.delete(id);
+    }, delay);
+    this.timeouts.set(id, id);
+    return id;
+  }
+  /**
+   * Create an interval that will be automatically tracked
+   *
+   * @param callback - Function to execute repeatedly
+   * @param delay - Delay between executions in milliseconds
+   * @returns Interval ID (can be used with clearInterval)
+   *
+   * @example
+   * ```typescript
+   * const id = this.timeoutManager.setInterval(() => {
+   *   console.log('Tick');
+   * }, 1000);
+   * ```
+   */
+  setInterval(callback, delay) {
+    const id = window.setInterval(callback, delay);
+    this.intervals.set(id, id);
+    return id;
+  }
+  /**
+   * Clear a specific timeout
+   *
+   * @param id - Timeout ID returned by setTimeout
+   *
+   * @example
+   * ```typescript
+   * const id = this.timeoutManager.setTimeout(...);
+   * this.timeoutManager.clearTimeout(id); // Cancel it
+   * ```
+   */
+  clearTimeout(id) {
+    window.clearTimeout(id);
+    this.timeouts.delete(id);
+  }
+  /**
+   * Clear a specific interval
+   *
+   * @param id - Interval ID returned by setInterval
+   *
+   * @example
+   * ```typescript
+   * const id = this.timeoutManager.setInterval(...);
+   * this.timeoutManager.clearInterval(id); // Stop it
+   * ```
+   */
+  clearInterval(id) {
+    window.clearInterval(id);
+    this.intervals.delete(id);
+  }
+  /**
+   * Clear all pending timeouts and intervals
+   *
+   * IMPORTANT: Call this in your component's destroy/cleanup method
+   * to prevent memory leaks.
+   *
+   * @example
+   * ```typescript
+   * destroy() {
+   *   this.timeoutManager.clearAll();
+   * }
+   * ```
+   */
+  clearAll() {
+    this.timeouts.forEach((id) => window.clearTimeout(id));
+    this.timeouts.clear();
+    this.intervals.forEach((id) => window.clearInterval(id));
+    this.intervals.clear();
+  }
+  /**
+   * Get the number of active timers (for debugging/testing)
+   *
+   * @returns Number of active timeouts + intervals
+   *
+   * @example
+   * ```typescript
+   * console.log(`Active timers: ${this.timeoutManager.activeCount}`);
+   * ```
+   */
+  get activeCount() {
+    return this.timeouts.size + this.intervals.size;
+  }
+  /**
+   * Get the number of active timeouts only (for debugging/testing)
+   */
+  get activeTimeouts() {
+    return this.timeouts.size;
+  }
+  /**
+   * Get the number of active intervals only (for debugging/testing)
+   */
+  get activeIntervals() {
+    return this.intervals.size;
+  }
+};
+
+// src/services/stats-formatter.ts
+var StatsFormatter = class {
+  /**
+   * Format time in seconds to MM:SS format
+   *
+   * @param seconds - Time in seconds
+   * @returns Formatted time string (MM:SS)
+   *
+   * @example
+   * ```typescript
+   * formatTime(0);    // "0:00"
+   * formatTime(45);   // "0:45"
+   * formatTime(90);   // "1:30"
+   * formatTime(3661); // "61:01"
+   * ```
+   */
+  formatTime(seconds) {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
+  }
+  /**
+   * Format reading statistics for display during reading
+   *
+   * Shows: words read/total, elapsed time, current WPM, remaining time
+   *
+   * @param stats - Reading statistics
+   * @returns Formatted stats string
+   *
+   * @example
+   * ```typescript
+   * formatReadingStats({
+   *   wordsRead: 150,
+   *   totalWords: 500,
+   *   elapsedTime: 45,
+   *   currentWpm: 200,
+   *   remainingTime: 105
+   * });
+   * // Returns: "150/500 words | 0:45 | 200 WPM | 1:45 left"
+   * ```
+   */
+  formatReadingStats(stats) {
+    const { wordsRead, totalWords, elapsedTime, currentWpm, remainingTime } = stats;
+    return [
+      `${wordsRead}/${totalWords} words`,
+      this.formatTime(elapsedTime),
+      `${currentWpm} WPM`,
+      `${this.formatTime(remainingTime)} left`
+    ].join(" | ");
+  }
+  /**
+   * Format loaded statistics for display after loading text
+   *
+   * Shows: words loaded, estimated duration, file info, instructions
+   *
+   * @param stats - Loaded statistics
+   * @returns Formatted stats string
+   *
+   * @example
+   * ```typescript
+   * // From beginning
+   * formatLoadedStats({
+   *   remainingWords: 500,
+   *   totalWords: 500,
+   *   estimatedDuration: 150
+   * });
+   * // Returns: "500 words loaded - ~2:30 - Shift+Space to start"
+   *
+   * // From cursor position
+   * formatLoadedStats({
+   *   remainingWords: 300,
+   *   totalWords: 500,
+   *   estimatedDuration: 90,
+   *   fileName: 'document.md',
+   *   startWordIndex: 200
+   * });
+   * // Returns: "300/500 words loaded from document.md - ~1:30 - Shift+Space to start"
+   * ```
+   */
+  formatLoadedStats(stats) {
+    const { remainingWords, totalWords, estimatedDuration, fileName, startWordIndex } = stats;
+    const wordInfo = startWordIndex && startWordIndex > 0 ? `${remainingWords}/${totalWords} words` : `${totalWords} words`;
+    const fileInfo = fileName ? ` from ${fileName}` : "";
+    const durationText = this.formatTime(estimatedDuration);
+    return `${wordInfo} loaded${fileInfo} - ~${durationText} - Shift+Space to start`;
+  }
+  /**
+   * Format word count for display
+   *
+   * @param wordsRead - Words read so far
+   * @param totalWords - Total words in document
+   * @returns Formatted word count string
+   *
+   * @example
+   * ```typescript
+   * formatWordCount(150, 500);  // "150/500 words"
+   * formatWordCount(0, 500);    // "0/500 words"
+   * formatWordCount(500, 500);  // "500/500 words"
+   * ```
+   */
+  formatWordCount(wordsRead, totalWords) {
+    return `${wordsRead}/${totalWords} words`;
+  }
+  /**
+   * Format WPM (words per minute) for display
+   *
+   * @param wpm - Words per minute
+   * @returns Formatted WPM string
+   *
+   * @example
+   * ```typescript
+   * formatWpm(200);  // "200 WPM"
+   * formatWpm(350);  // "350 WPM"
+   * ```
+   */
+  formatWpm(wpm) {
+    return `${wpm} WPM`;
+  }
+};
+
+// src/ui-builders.ts
+function createButton(parent, config) {
+  const className = config.className ? `${CSS_CLASSES.btn} ${config.className}` : CSS_CLASSES.btn;
+  const btn = parent.createEl("button", {
+    text: config.icon,
+    cls: className,
+    attr: { title: config.title }
+  });
+  btn.addEventListener("click", config.onClick);
+  return btn;
+}
+function createNumberControl(parent, config, registry) {
+  const container = parent.createDiv({ cls: CSS_CLASSES.controlGroup });
+  container.createEl("span", {
+    text: config.label,
+    cls: CSS_CLASSES.controlLabel
+  });
+  createButton(container, {
+    icon: config.decrementIcon || ICONS.decrement,
+    title: config.decrementTitle || `Decrease (${config.increment || 1})`,
+    onClick: config.onDecrement,
+    className: CSS_CLASSES.smallBtn
+  });
+  const valueEl = container.createEl("span", {
+    text: String(config.value),
+    cls: config.registryKey || "value-display"
+  });
+  if (config.registryKey && registry) {
+    registry.register(config.registryKey, valueEl);
+  }
+  createButton(container, {
+    icon: config.incrementIcon || ICONS.increment,
+    title: config.incrementTitle || `Increase (+${config.increment || 1})`,
+    onClick: config.onIncrement,
+    className: CSS_CLASSES.smallBtn
+  });
+  return { container, valueEl };
+}
+function createToggleControl(parent, config) {
+  const container = parent.createDiv({ cls: CSS_CLASSES.settingGroup });
+  const toggle = container.createEl("label", { cls: CSS_CLASSES.settingToggle });
+  const checkbox = toggle.createEl("input", { type: "checkbox" });
+  checkbox.checked = config.checked;
+  checkbox.addEventListener("change", () => {
+    config.onChange(checkbox.checked);
+  });
+  toggle.createEl("span", { text: ` ${config.label}` });
+  return { container, checkbox };
+}
+function createPlayPauseButtons(parent, onPlay, onPause, registry) {
+  const playBtn = createButton(parent, {
+    icon: ICONS.play,
+    title: "Play (Shift+Space)",
+    onClick: onPlay,
+    className: CSS_CLASSES.playBtn
+  });
+  const pauseBtn = createButton(parent, {
+    icon: ICONS.pause,
+    title: "Pause (Shift+Space)",
+    onClick: onPause,
+    className: `${CSS_CLASSES.pauseBtn} ${CSS_CLASSES.hidden}`
+  });
+  registry.register("playBtn", playBtn);
+  registry.register("pauseBtn", pauseBtn);
+}
+function updatePlayPauseButtons(registry, isPlaying) {
+  registry.toggleClass("playBtn", CSS_CLASSES.hidden, isPlaying);
+  registry.toggleClass("pauseBtn", CSS_CLASSES.hidden, !isPlaying);
+}
+
+// src/auto-load-manager.ts
+var import_obsidian = require("obsidian");
+function isNavigationKey(evt) {
+  return (
+    // Arrow keys
+    evt.key === "ArrowUp" || evt.key === "ArrowDown" || evt.key === "ArrowLeft" || evt.key === "ArrowRight" || // Home/End/PageUp/PageDown
+    evt.key === "Home" || evt.key === "End" || evt.key === "PageUp" || evt.key === "PageDown" || // Enter
+    evt.key === "Enter" || // Vim-style navigation
+    evt.key === "j" && evt.ctrlKey || evt.key === "k" && evt.ctrlKey || evt.key === "d" && evt.ctrlKey || evt.key === "u" && evt.ctrlKey || // Cmd/Ctrl + arrows
+    (evt.key === "ArrowUp" || evt.key === "ArrowDown") && (evt.metaKey || evt.ctrlKey)
+  );
+}
+function isSelectionKey(evt) {
+  return evt.shiftKey || evt.key === "a" && (evt.metaKey || evt.ctrlKey);
+}
+function extractEditorContent(app) {
+  const activeView = app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
+  if (!activeView) {
+    return { activeView: null, currentFile: null };
+  }
+  const currentFile = app.workspace.getActiveFile();
+  if (!currentFile) {
+    return { activeView, currentFile: null };
+  }
+  const fileName = currentFile.name;
+  const editor = activeView.editor;
+  let selection;
+  let lineNumber;
+  if (editor.somethingSelected()) {
+    selection = editor.getSelection();
+    const cursor2 = editor.getCursor("from");
+    lineNumber = cursor2.line + 1;
+  }
+  const fullContent = editor.getValue();
+  const cursor = editor.getCursor();
+  const cursorPosition = editor.posToOffset(cursor);
+  return {
+    activeView,
+    currentFile,
+    fileName,
+    selection,
+    fullContent,
+    cursorPosition,
+    lineNumber
+  };
+}
+var AutoLoadManager = class {
+  /**
+   * Creates a new AutoLoadManager instance
+   *
+   * @param app - Obsidian App instance for accessing workspace and editor
+   * @param loadTextCallback - Callback function to load text into DashReader view
+   * @param isViewShown - Function that returns true if DashReader view is currently visible
+   * @param timeoutManager - Timeout manager for proper cleanup
+   *
+   * @example
+   * ```typescript
+   * this.autoLoadManager = new AutoLoadManager(
+   *   this.app,
+   *   (text, source) => this.loadText(text, source),
+   *   () => this.isViewShown,
+   *   this.timeoutManager
+   * );
+   * ```
+   */
+  constructor(app, loadTextCallback, isViewShown, timeoutManager) {
+    this.app = app;
+    this.loadTextCallback = loadTextCallback;
+    this.isViewShown = isViewShown;
+    this.timeoutManager = timeoutManager;
+    this.state = {
+      lastSelection: "",
+      lastFilePath: "",
+      lastCursorPosition: -1,
+      lastCheckTime: 0
+    };
+  }
+  /**
+   * Check for selection or cursor changes and load text if needed
+   *
+   * This is the main method called by keyboard and mouse event handlers.
+   * It implements throttling (150ms) to avoid performance issues from
+   * rapid event firing.
+   *
+   * **Logic Flow**:
+   * 1. Throttle: Skip if less than 150ms since last check
+   * 2. Extract editor content (selection, cursor position, etc.)
+   * 3. Priority 1: If selection exists and changed → load selection
+   * 4. Priority 2: If cursor moved → reload from new cursor position
+   *
+   * **Prevents Redundant Loads**:
+   * - Tracks lastSelection to avoid reloading same text
+   * - Tracks lastCursorPosition to avoid reload on unchanged position
+   *
+   * **Typical Usage**: Called on keyup and mouseup events
+   *
+   * @example
+   * ```typescript
+   * // In rsvp-view.ts setupAutoLoad()
+   * this.registerDomEvent(document, 'keyup', (evt) => {
+   *   if (isNavigationKey(evt) || isSelectionKey(evt)) {
+   *     this.autoLoadManager.checkSelectionOrCursor();
+   *   }
+   * });
+   *
+   * this.registerDomEvent(document, 'mouseup', () => {
+   *   this.autoLoadManager.checkSelectionOrCursor();
+   * });
+   * ```
+   */
+  checkSelectionOrCursor() {
+    const now = Date.now();
+    if (now - this.state.lastCheckTime < TIMING.throttleDelay) {
+      return;
+    }
+    this.state.lastCheckTime = now;
+    const content = extractEditorContent(this.app);
+    if (!content.activeView || !content.currentFile) {
+      return;
+    }
+    if (content.selection && content.selection.length > TEXT_LIMITS.minSelectionLength) {
+      if (content.selection !== this.state.lastSelection) {
+        this.state.lastSelection = content.selection;
+        this.loadTextCallback(content.selection, {
+          fileName: content.fileName,
+          lineNumber: content.lineNumber
+        });
+      }
+      return;
+    }
+    if (content.fullContent && content.fullContent.trim().length > TEXT_LIMITS.minContentLength) {
+      if (content.cursorPosition !== this.state.lastCursorPosition) {
+        this.loadTextCallback(content.fullContent, {
+          fileName: content.fileName,
+          cursorPosition: content.cursorPosition
+        });
+        this.state.lastSelection = "";
+        this.state.lastCursorPosition = content.cursorPosition;
+      }
+    }
+  }
+  /**
+   * Load content from the active editor with a configurable delay
+   *
+   * Used by file-open and leaf-change events to load content after a short
+   * delay, giving Obsidian time to fully activate the editor.
+   *
+   * **Priority Logic**:
+   * 1. If text is selected → load selection (rare on file open)
+   * 2. Otherwise → load full document from cursor position
+   *
+   * **Delay Rationale**:
+   * - file-open: 300ms default - editor needs time to initialize
+   * - leaf-change: Can use shorter delay (200ms) - editor already active
+   *
+   * @param delay - Delay in milliseconds before loading (default: 300ms from TIMING.autoLoadDelay)
+   *
+   * @example
+   * ```typescript
+   * // File-open event (use default 300ms delay)
+   * this.registerEvent(
+   *   this.app.workspace.on('file-open', () => {
+   *     this.autoLoadManager.loadFromEditor();
+   *   })
+   * );
+   *
+   * // Leaf-change event (use shorter 200ms delay)
+   * this.registerEvent(
+   *   this.app.workspace.on('active-leaf-change', () => {
+   *     this.autoLoadManager.loadFromEditor(TIMING.autoLoadDelayShort);
+   *   })
+   * );
+   * ```
+   */
+  loadFromEditor(delay = TIMING.autoLoadDelay) {
+    this.timeoutManager.setTimeout(() => {
+      if (!this.isViewShown())
+        return;
+      const content = extractEditorContent(this.app);
+      if (!content.activeView || !content.currentFile)
+        return;
+      if (content.selection && content.selection.length > TEXT_LIMITS.minSelectionLength) {
+        this.loadTextCallback(content.selection, {
+          fileName: content.fileName,
+          lineNumber: content.lineNumber
+        });
+        return;
+      }
+      if (content.fullContent && content.fullContent.trim().length > TEXT_LIMITS.minContentLength) {
+        this.loadTextCallback(content.fullContent, {
+          fileName: content.fileName,
+          cursorPosition: content.cursorPosition
+        });
+      }
+    }, delay);
+  }
+  /**
+   * Reset tracking state for a new file
+   *
+   * Called when the active file changes to clear previous selection and
+   * cursor tracking. This prevents attempting to reload content from the
+   * previous file's state.
+   *
+   * @param filePath - Path of the newly opened file
+   *
+   * @example
+   * ```typescript
+   * this.registerEvent(
+   *   this.app.workspace.on('file-open', (file) => {
+   *     if (file && this.autoLoadManager.hasFileChanged(file.path)) {
+   *       this.autoLoadManager.resetForNewFile(file.path);
+   *       this.autoLoadManager.loadFromEditor();
+   *     }
+   *   })
+   * );
+   * ```
+   */
+  resetForNewFile(filePath) {
+    this.state.lastSelection = "";
+    this.state.lastFilePath = filePath;
+    this.state.lastCursorPosition = -1;
+  }
+  /**
+   * Check if the file has changed
+   *
+   * Compares the given file path with the last tracked file path to determine
+   * if the user has switched to a different file.
+   *
+   * @param filePath - File path to check
+   * @returns True if the file path is different from the last tracked path
+   *
+   * @example
+   * ```typescript
+   * if (this.autoLoadManager.hasFileChanged(currentFile.path)) {
+   *   console.log('User switched to a different file');
+   *   this.autoLoadManager.resetForNewFile(currentFile.path);
+   * }
+   * ```
+   */
+  hasFileChanged(filePath) {
+    return filePath !== this.state.lastFilePath;
+  }
+  /**
+   * Get current state (for debugging)
+   *
+   * Returns a readonly copy of the internal state for debugging purposes.
+   * Useful for understanding why auto-load is or isn't triggering.
+   *
+   * @returns Readonly copy of the current AutoLoadState
+   *
+   * @example
+   * ```typescript
+   * const state = this.autoLoadManager.getState();
+   * console.log('AutoLoad state:', {
+   *   lastSelection: state.lastSelection.substring(0, 50) + '...',
+   *   lastFilePath: state.lastFilePath,
+   *   lastCursorPosition: state.lastCursorPosition,
+   *   lastCheckTime: new Date(state.lastCheckTime).toISOString()
+   * });
+   * ```
+   */
+  getState() {
+    return { ...this.state };
+  }
+};
+
 // src/rsvp-view.ts
 var VIEW_TYPE_DASHREADER = "dashreader-view";
-var DashReaderView = class extends import_obsidian.ItemView {
+var DashReaderView = class extends import_obsidian2.ItemView {
+  // ──────────────────────────────────────────────────────────────────────
+  // Constructor
+  // ──────────────────────────────────────────────────────────────────────
+  /**
+   * Creates a new DashReaderView instance
+   *
+   * @param leaf - Obsidian workspace leaf to attach to
+   * @param settings - Plugin settings
+   */
   constructor(leaf, settings) {
     super(leaf);
-    this.startTime = 0;
-    this.wordsRead = 0;
-    this.showingControls = false;
-    this.showingSettings = false;
     this.settings = settings;
+    this.state = new ViewState({
+      currentWpm: settings.wpm,
+      currentChunkSize: settings.chunkSize,
+      currentFontSize: settings.fontSize
+    });
+    this.dom = new DOMRegistry();
+    this.timeoutManager = new TimeoutManager();
+    this.statsFormatter = new StatsFormatter();
     this.engine = new RSVPEngine(
       settings,
       this.onWordChange.bind(this),
-      this.onComplete.bind(this)
+      this.onComplete.bind(this),
+      this.timeoutManager
+    );
+    this.autoLoadManager = new AutoLoadManager(
+      this.app,
+      this.loadText.bind(this),
+      () => {
+        var _a, _b;
+        return (_b = (_a = this.mainContainerEl) == null ? void 0 : _a.isShown()) != null ? _b : false;
+      },
+      this.timeoutManager
     );
   }
+  // ──────────────────────────────────────────────────────────────────────
+  // Obsidian View Lifecycle
+  // ──────────────────────────────────────────────────────────────────────
+  /**
+   * Returns the unique view type identifier
+   * @returns View type string
+   */
   getViewType() {
     return VIEW_TYPE_DASHREADER;
   }
+  /**
+   * Returns the display name shown in Obsidian UI
+   * @returns Display name
+   */
   getDisplayText() {
     return "DashReader";
   }
+  /**
+   * Returns the icon identifier for this view
+   * @returns Icon name
+   */
   getIcon() {
     return "zap";
   }
+  /**
+   * Called when the view is opened
+   * Builds UI, sets up hotkeys, and registers auto-load
+   */
   async onOpen() {
-    this.mainContainerEl = this.contentEl.createDiv({ cls: "dashreader-container" });
+    this.mainContainerEl = this.contentEl.createDiv({ cls: CSS_CLASSES.container });
     this.buildUI();
+    this.breadcrumbManager = new BreadcrumbManager(this.breadcrumbEl, this.engine, this.timeoutManager);
+    this.wordDisplay = new WordDisplay(this.wordEl, this.settings);
+    this.hotkeyHandler = new HotkeyHandler(this.settings, {
+      onTogglePlay: () => this.togglePlay(),
+      onRewind: () => this.engine.rewind(),
+      onForward: () => this.engine.forward(),
+      onIncrementWpm: () => this.changeValue("wpm", 10),
+      onDecrementWpm: () => this.changeValue("wpm", -10),
+      onQuit: () => this.engine.stop()
+    });
+    this.minimapManager = new MinimapManager(this.mainContainerEl, this.engine, this.timeoutManager);
+    this.wordDisplay.displayWelcomeMessage(
+      ICONS.book,
+      "Select text to start reading",
+      'or use Cmd+P \u2192 "Read selected text"'
+    );
+    this.toggleContextDisplay();
+    this.toggleMinimapDisplay();
+    this.toggleBreadcrumbDisplay();
     this.setupHotkeys();
     this.app.workspace.onLayoutReady(() => {
       this.setupAutoLoad();
     });
   }
+  /**
+   * Called when the view is closed
+   * Stops reading and cleans up resources
+   */
+  async onClose() {
+    this.engine.stop();
+    this.timeoutManager.clearAll();
+    this.dom.clear();
+  }
+  // ============================================================================
+  // SECTION 3: UI CONSTRUCTION
+  // ============================================================================
+  /**
+   * Orchestrates the construction of all UI components
+   * Called once during view initialization
+   *
+   * Order matters: toggle bar, breadcrumb, stats, display, progress, controls, settings
+   */
   buildUI() {
-    this.toggleBar = this.mainContainerEl.createDiv({ cls: "dashreader-toggle-bar" });
-    const toggleControls = this.toggleBar.createEl("button", {
-      cls: "dashreader-toggle-btn",
-      attr: { title: "Toggle controls (C)" }
+    this.buildToggleBar();
+    this.buildBreadcrumb();
+    this.buildStats();
+    this.buildDisplayArea();
+    this.buildProgressBar();
+    this.buildControls();
+    this.buildInlineSettings();
+  }
+  /**
+   * Builds the toggle bar with settings and stats buttons
+   * Located at the top of the view
+   */
+  buildToggleBar() {
+    this.toggleBar = this.mainContainerEl.createDiv({ cls: CSS_CLASSES.toggleBar });
+    createButton(this.toggleBar, {
+      icon: ICONS.settings,
+      title: "Toggle controls (C)",
+      onClick: () => this.togglePanel("controls"),
+      className: CSS_CLASSES.toggleBtn
     });
-    toggleControls.innerHTML = "\u2699\uFE0F";
-    toggleControls.addEventListener("click", () => this.toggleControls());
-    const toggleStats = this.toggleBar.createEl("button", {
-      cls: "dashreader-toggle-btn",
-      attr: { title: "Toggle stats (S)" }
+    createButton(this.toggleBar, {
+      icon: ICONS.stats,
+      title: "Toggle stats (S)",
+      onClick: () => this.togglePanel("stats"),
+      className: CSS_CLASSES.toggleBtn
     });
-    toggleStats.innerHTML = "\u{1F4CA}";
-    toggleStats.addEventListener("click", () => this.toggleStats());
-    this.statsEl = this.mainContainerEl.createDiv({ cls: "dashreader-stats hidden" });
-    this.wpmDisplayEl = this.statsEl.createDiv({ cls: "dashreader-wpm-display" });
-    this.wpmDisplayEl.setText(`${this.settings.wpm} WPM`);
-    const statsText = this.statsEl.createDiv({ cls: "dashreader-stats-text" });
+    createButton(this.toggleBar, {
+      icon: ICONS.expand,
+      title: "Open in new tab",
+      onClick: () => this.openInNewTab(),
+      className: CSS_CLASSES.toggleBtn
+    });
+  }
+  /**
+   * Builds the breadcrumb navigation bar
+   * Shows the hierarchical position in the document (H1 > H2 > H3 etc.)
+   * Updated automatically as reading progresses through headings
+   */
+  buildBreadcrumb() {
+    this.breadcrumbEl = this.mainContainerEl.createDiv({
+      cls: `dashreader-breadcrumb ${CSS_CLASSES.hidden}`
+    });
+  }
+  /**
+   * Builds the statistics display panel
+   * Shows WPM, words read, time elapsed, etc.
+   */
+  buildStats() {
+    this.statsEl = this.mainContainerEl.createDiv({
+      cls: `${CSS_CLASSES.stats} ${CSS_CLASSES.hidden}`
+    });
+    this.dom.register("statsEl", this.statsEl);
+    const wpmDisplay = this.statsEl.createDiv({ cls: CSS_CLASSES.wpmDisplay });
+    wpmDisplay.setText(`${this.settings.wpm} WPM`);
+    this.dom.register("wpmDisplay", wpmDisplay);
+    const statsText = this.statsEl.createDiv({ cls: CSS_CLASSES.statsText });
     statsText.setText("Ready");
-    const displayArea = this.mainContainerEl.createDiv({ cls: "dashreader-display" });
+    this.dom.register("statsText", statsText);
+  }
+  /**
+   * Builds the main display area for word presentation
+   * Includes context before/after if enabled
+   */
+  buildDisplayArea() {
+    const displayArea = this.mainContainerEl.createDiv({ cls: CSS_CLASSES.display });
     if (this.settings.showContext) {
-      this.contextBeforeEl = displayArea.createDiv({ cls: "dashreader-context-before" });
+      this.contextBeforeEl = displayArea.createDiv({ cls: CSS_CLASSES.contextBefore });
+      this.dom.register("contextBeforeEl", this.contextBeforeEl);
     }
-    this.wordEl = displayArea.createDiv({ cls: "dashreader-word" });
+    this.wordEl = displayArea.createDiv({ cls: CSS_CLASSES.word });
     this.wordEl.style.fontSize = `${this.settings.fontSize}px`;
     this.wordEl.style.fontFamily = this.settings.fontFamily;
     this.wordEl.style.color = this.settings.fontColor;
-    const welcomeMsg = this.wordEl.createDiv({ cls: "dashreader-welcome" });
-    welcomeMsg.innerHTML = `
-      <div style="font-size: 20px; color: var(--text-muted); text-align: center;">
-        <div style="margin-bottom: 12px;">\u{1F4D6} Select text to start reading</div>
-        <div style="font-size: 14px; opacity: 0.7;">or use Cmd+P \u2192 "Read selected text"</div>
-      </div>
-    `;
+    this.dom.register("wordEl", this.wordEl);
     if (this.settings.showContext) {
-      this.contextAfterEl = displayArea.createDiv({ cls: "dashreader-context-after" });
+      this.contextAfterEl = displayArea.createDiv({ cls: CSS_CLASSES.contextAfter });
+      this.dom.register("contextAfterEl", this.contextAfterEl);
     }
-    this.progressEl = this.mainContainerEl.createDiv({ cls: "dashreader-progress-container" });
-    const progressBar = this.progressEl.createDiv({ cls: "dashreader-progress-bar" });
+  }
+  /**
+   * Builds the progress bar at the bottom of display
+   * Updates during reading to show progress
+   */
+  buildProgressBar() {
+    this.progressEl = this.mainContainerEl.createDiv({ cls: CSS_CLASSES.progressContainer });
+    const progressBar = this.progressEl.createDiv({ cls: CSS_CLASSES.progressBar });
     progressBar.style.width = "0%";
     progressBar.style.background = this.settings.highlightColor;
-    this.controlsEl = this.mainContainerEl.createDiv({ cls: "dashreader-controls hidden" });
-    this.buildControls();
-    this.settingsEl = this.mainContainerEl.createDiv({ cls: "dashreader-settings hidden" });
-    this.buildInlineSettings();
+    this.dom.register("progressBar", progressBar);
   }
+  /**
+   * Builds the playback controls panel
+   * Includes play/pause, rewind, forward, stop, WPM, and chunk size controls
+   */
   buildControls() {
-    const playControls = this.controlsEl.createDiv({ cls: "dashreader-control-group" });
-    this.createButton(playControls, "\u23EE", "Rewind (\u2190)", () => this.engine.rewind());
-    this.createButton(playControls, "\u25B6", "Play (Shift+Space)", () => this.togglePlay(), "play-btn");
-    this.createButton(playControls, "\u23F8", "Pause (Shift+Space)", () => this.engine.pause(), "pause-btn hidden");
-    this.createButton(playControls, "\u23ED", "Forward (\u2192)", () => this.engine.forward());
-    this.createButton(playControls, "\u23F9", "Stop (Esc)", () => this.engine.reset());
-    const wpmGroup = this.controlsEl.createDiv({ cls: "dashreader-control-group" });
-    wpmGroup.createEl("span", { text: "WPM: ", cls: "control-label" });
-    this.createButton(wpmGroup, "\u2212", "Decrease WPM (\u2193)", () => this.changeWpm(-25), "small-btn");
-    const wpmValue = wpmGroup.createEl("span", { text: String(this.settings.wpm), cls: "wpm-value" });
-    this.createButton(wpmGroup, "+", "Increase WPM (\u2191)", () => this.changeWpm(25), "small-btn");
-    const wordsGroup = this.controlsEl.createDiv({ cls: "dashreader-control-group" });
-    wordsGroup.createEl("span", { text: "Words: ", cls: "control-label" });
-    this.createButton(wordsGroup, "\u2212", "Fewer words", () => this.changeChunkSize(-1), "small-btn");
-    const chunkValue = wordsGroup.createEl("span", { text: String(this.settings.chunkSize), cls: "chunk-value" });
-    this.createButton(wordsGroup, "+", "More words", () => this.changeChunkSize(1), "small-btn");
+    this.controlsEl = this.mainContainerEl.createDiv({
+      cls: `${CSS_CLASSES.controls} ${CSS_CLASSES.hidden}`
+    });
+    this.dom.register("controlsEl", this.controlsEl);
+    const playControls = this.controlsEl.createDiv({ cls: CSS_CLASSES.controlGroup });
+    createButton(playControls, {
+      icon: ICONS.rewind,
+      title: "Rewind (\u2190)",
+      onClick: () => this.engine.rewind()
+    });
+    createPlayPauseButtons(playControls, () => this.togglePlay(), () => this.engine.pause(), this.dom);
+    createButton(playControls, {
+      icon: ICONS.forward,
+      title: "Forward (\u2192)",
+      onClick: () => this.engine.forward()
+    });
+    createButton(playControls, {
+      icon: ICONS.stop,
+      title: "Stop (Esc)",
+      onClick: () => this.engine.reset()
+    });
+    createNumberControl(
+      this.controlsEl,
+      {
+        label: "WPM: ",
+        value: this.settings.wpm,
+        onIncrement: () => this.changeValue("wpm", INCREMENTS.wpm),
+        onDecrement: () => this.changeValue("wpm", -INCREMENTS.wpm),
+        increment: INCREMENTS.wpm,
+        registryKey: "wpmValue"
+      },
+      this.dom
+    );
+    createNumberControl(
+      this.controlsEl,
+      {
+        label: "Words: ",
+        value: this.settings.chunkSize,
+        onIncrement: () => this.changeValue("chunkSize", INCREMENTS.chunkSize),
+        onDecrement: () => this.changeValue("chunkSize", -INCREMENTS.chunkSize),
+        registryKey: "chunkValue"
+      },
+      this.dom
+    );
   }
+  /**
+   * Builds the inline settings panel
+   * Allows quick adjustments to WPM, acceleration, font size, etc.
+   */
   buildInlineSettings() {
-    const wpmGroup = this.settingsEl.createDiv({ cls: "dashreader-setting-group" });
-    wpmGroup.createEl("span", { text: "Speed (WPM): ", cls: "setting-label" });
-    this.createButton(wpmGroup, "\u2212", "Slower (-25)", () => this.changeWpmInline(-25), "small-btn");
-    const wpmValue = wpmGroup.createEl("span", { text: String(this.settings.wpm), cls: "wpm-inline-value" });
-    this.createButton(wpmGroup, "+", "Faster (+25)", () => this.changeWpmInline(25), "small-btn");
-    const accelToggleGroup = this.settingsEl.createDiv({ cls: "dashreader-setting-group" });
-    const accelToggle = accelToggleGroup.createEl("label", { cls: "setting-toggle" });
-    const accelCheckbox = accelToggle.createEl("input", { type: "checkbox" });
-    accelCheckbox.checked = this.settings.enableAcceleration;
-    accelCheckbox.addEventListener("change", () => {
-      this.settings.enableAcceleration = accelCheckbox.checked;
-      this.engine.updateSettings(this.settings);
-      accelDurationGroup.style.display = accelCheckbox.checked ? "flex" : "none";
-      accelTargetGroup.style.display = accelCheckbox.checked ? "flex" : "none";
+    this.settingsEl = this.mainContainerEl.createDiv({
+      cls: `${CSS_CLASSES.settings} ${CSS_CLASSES.hidden}`
     });
-    accelToggle.createEl("span", { text: " Speed Acceleration" });
-    const accelDurationGroup = this.settingsEl.createDiv({ cls: "dashreader-setting-group" });
-    accelDurationGroup.createEl("span", { text: "Accel Duration (s): ", cls: "setting-label" });
-    this.createButton(accelDurationGroup, "\u2212", "Shorter (-5s)", () => this.changeAccelDuration(-5), "small-btn");
-    const accelDurationValue = accelDurationGroup.createEl("span", { text: String(this.settings.accelerationDuration), cls: "accel-duration-value" });
-    this.createButton(accelDurationGroup, "+", "Longer (+5s)", () => this.changeAccelDuration(5), "small-btn");
-    accelDurationGroup.style.display = this.settings.enableAcceleration ? "flex" : "none";
-    const accelTargetGroup = this.settingsEl.createDiv({ cls: "dashreader-setting-group" });
-    accelTargetGroup.createEl("span", { text: "Target WPM: ", cls: "setting-label" });
-    this.createButton(accelTargetGroup, "\u2212", "Lower (-25)", () => this.changeAccelTarget(-25), "small-btn");
-    const accelTargetValue = accelTargetGroup.createEl("span", { text: String(this.settings.accelerationTargetWpm), cls: "accel-target-value" });
-    this.createButton(accelTargetGroup, "+", "Higher (+25)", () => this.changeAccelTarget(25), "small-btn");
-    accelTargetGroup.style.display = this.settings.enableAcceleration ? "flex" : "none";
-    const fontSizeGroup = this.settingsEl.createDiv({ cls: "dashreader-setting-group" });
-    fontSizeGroup.createEl("span", { text: "Font Size: ", cls: "setting-label" });
-    this.createButton(fontSizeGroup, "\u2212", "Smaller", () => this.changeFontSize(-4), "small-btn");
-    const fontValue = fontSizeGroup.createEl("span", { text: String(this.settings.fontSize), cls: "font-value" });
-    this.createButton(fontSizeGroup, "+", "Larger", () => this.changeFontSize(4), "small-btn");
-    const contextGroup = this.settingsEl.createDiv({ cls: "dashreader-setting-group" });
-    const contextToggle = contextGroup.createEl("label", { cls: "setting-toggle" });
-    const contextCheckbox = contextToggle.createEl("input", { type: "checkbox" });
-    contextCheckbox.checked = this.settings.showContext;
-    contextCheckbox.addEventListener("change", () => {
-      this.settings.showContext = contextCheckbox.checked;
-      this.toggleContextDisplay();
+    this.dom.register("settingsEl", this.settingsEl);
+    createNumberControl(
+      this.settingsEl,
+      {
+        label: "Speed (WPM): ",
+        value: this.settings.wpm,
+        onIncrement: () => this.changeValue("wpm", INCREMENTS.wpm),
+        onDecrement: () => this.changeValue("wpm", -INCREMENTS.wpm),
+        increment: INCREMENTS.wpm,
+        registryKey: "wpmInlineValue",
+        decrementTitle: "Slower (-25)",
+        incrementTitle: "Faster (+25)"
+      },
+      this.dom
+    );
+    createToggleControl(this.settingsEl, {
+      label: "Slow Start",
+      checked: this.settings.enableSlowStart,
+      onChange: (checked) => {
+        this.settings.enableSlowStart = checked;
+        this.engine.updateSettings(this.settings);
+      }
     });
-    contextToggle.createEl("span", { text: " Show context" });
-    const micropauseGroup = this.settingsEl.createDiv({ cls: "dashreader-setting-group" });
-    const micropauseToggle = micropauseGroup.createEl("label", { cls: "setting-toggle" });
-    const micropauseCheckbox = micropauseToggle.createEl("input", { type: "checkbox" });
-    micropauseCheckbox.checked = this.settings.enableMicropause;
-    micropauseCheckbox.addEventListener("change", () => {
-      this.settings.enableMicropause = micropauseCheckbox.checked;
-      this.engine.updateSettings(this.settings);
+    createNumberControl(
+      this.settingsEl,
+      {
+        label: "Font Size: ",
+        value: this.settings.fontSize,
+        onIncrement: () => this.changeValue("fontSize", INCREMENTS.fontSize),
+        onDecrement: () => this.changeValue("fontSize", -INCREMENTS.fontSize),
+        registryKey: "fontValue",
+        decrementTitle: "Smaller",
+        incrementTitle: "Larger"
+      },
+      this.dom
+    );
+    createToggleControl(this.settingsEl, {
+      label: "Show context",
+      checked: this.settings.showContext,
+      onChange: (checked) => {
+        this.settings.showContext = checked;
+        this.toggleContextDisplay();
+      }
     });
-    micropauseToggle.createEl("span", { text: " Micropause" });
-  }
-  createButton(parent, text, title, onClick, className = "") {
-    const btn = parent.createEl("button", {
-      text,
-      cls: `dashreader-btn ${className}`,
-      attr: { title }
+    createToggleControl(this.settingsEl, {
+      label: "Minimap",
+      checked: this.settings.showMinimap,
+      onChange: (checked) => {
+        this.settings.showMinimap = checked;
+        this.toggleMinimapDisplay();
+      }
     });
-    btn.addEventListener("click", onClick);
-    return btn;
+    createToggleControl(this.settingsEl, {
+      label: "Breadcrumb",
+      checked: this.settings.showBreadcrumb,
+      onChange: (checked) => {
+        this.settings.showBreadcrumb = checked;
+        this.toggleBreadcrumbDisplay();
+      }
+    });
+    createToggleControl(this.settingsEl, {
+      label: "Micropause",
+      checked: this.settings.enableMicropause,
+      onChange: (checked) => {
+        this.settings.enableMicropause = checked;
+        this.engine.updateSettings(this.settings);
+      }
+    });
   }
-  toggleControls() {
-    this.showingControls = !this.showingControls;
-    this.controlsEl.toggleClass("hidden", !this.showingControls);
-    this.settingsEl.toggleClass("hidden", !this.showingControls);
+  // ============================================================================
+  // SECTION 4: USER INTERACTIONS
+  // ============================================================================
+  /**
+   * Unified value change handler
+   * Replaces 5 separate change functions (changeWpm, changeWpmInline, etc.)
+   *
+   * @param type - Type of value to change
+   * @param delta - Amount to change (positive or negative)
+   */
+  changeValue(type, delta) {
+    switch (type) {
+      case "wpm": {
+        const newWpm = this.engine.getWpm() + delta;
+        this.engine.setWpm(newWpm);
+        this.settings.wpm = this.engine.getWpm();
+        this.state.set("currentWpm", this.settings.wpm);
+        this.dom.updateMultipleText({
+          wpmDisplay: `${this.settings.wpm} WPM`,
+          wpmValue: String(this.settings.wpm),
+          wpmInlineValue: String(this.settings.wpm)
+        });
+        break;
+      }
+      case "chunkSize": {
+        const newSize = this.engine.getChunkSize() + delta;
+        this.engine.setChunkSize(newSize);
+        this.settings.chunkSize = this.engine.getChunkSize();
+        this.state.set("currentChunkSize", this.settings.chunkSize);
+        this.dom.updateText("chunkValue", this.settings.chunkSize);
+        break;
+      }
+      case "fontSize": {
+        const newSize = Math.max(
+          LIMITS.fontSize.min,
+          Math.min(LIMITS.fontSize.max, this.settings.fontSize + delta)
+        );
+        this.settings.fontSize = newSize;
+        this.state.set("currentFontSize", newSize);
+        this.wordEl.style.fontSize = `${newSize}px`;
+        this.dom.updateText("fontValue", newSize);
+        break;
+      }
+    }
   }
-  toggleStats() {
-    this.showingSettings = !this.showingSettings;
-    this.statsEl.toggleClass("hidden", !this.showingSettings);
+  /**
+   * Unified panel toggle handler
+   * Replaces 3 separate toggle functions (toggleControls, toggleStats, etc.)
+   *
+   * @param panel - Panel to toggle ('controls' or 'stats')
+   */
+  togglePanel(panel) {
+    if (panel === "controls") {
+      this.state.toggle("showingControls");
+      const showing = this.state.get("showingControls");
+      this.controlsEl.toggleClass(CSS_CLASSES.hidden, !showing);
+      this.settingsEl.toggleClass(CSS_CLASSES.hidden, !showing);
+    } else if (panel === "stats") {
+      this.state.toggle("showingStats");
+      const showing = this.state.get("showingStats");
+      this.statsEl.toggleClass(CSS_CLASSES.hidden, !showing);
+    }
   }
+  /**
+   * Toggles the visibility of context before/after current word
+   */
   toggleContextDisplay() {
+    const shouldHide = !this.settings.showContext;
     if (this.contextBeforeEl) {
-      this.contextBeforeEl.style.display = this.settings.showContext ? "block" : "none";
+      this.contextBeforeEl.toggleClass(CSS_CLASSES.hidden, shouldHide);
     }
     if (this.contextAfterEl) {
-      this.contextAfterEl.style.display = this.settings.showContext ? "block" : "none";
+      this.contextAfterEl.toggleClass(CSS_CLASSES.hidden, shouldHide);
     }
   }
-  setupAutoLoad() {
-    let lastSelection = "";
-    let lastFilePath = "";
-    let lastCursorPosition = -1;
-    let lastCheckTime = 0;
-    const checkSelectionOrCursor = () => {
-      const now = Date.now();
-      if (now - lastCheckTime < 150) {
-        return;
-      }
-      lastCheckTime = now;
-      const activeView = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
-      if (!activeView)
-        return;
-      const currentFile = this.app.workspace.getActiveFile();
-      if (!currentFile)
-        return;
-      const fileName = currentFile.name;
-      if (activeView.editor.somethingSelected()) {
-        const selection = activeView.editor.getSelection();
-        if (selection && selection.length > 30 && selection !== lastSelection) {
-          lastSelection = selection;
-          const cursor = activeView.editor.getCursor("from");
-          const lineNumber = cursor.line + 1;
-          console.log("DashReader: Auto-loading selection", selection.length, "characters from", fileName, "line", lineNumber);
-          this.loadText(selection, { fileName, lineNumber });
-        }
+  /**
+   * Toggle minimap visibility
+   */
+  toggleMinimapDisplay() {
+    if (this.minimapManager) {
+      if (this.settings.showMinimap) {
+        this.minimapManager.show();
       } else {
-        const fullContent = activeView.editor.getValue();
-        if (fullContent && fullContent.trim().length > 50) {
-          const cursor = activeView.editor.getCursor();
-          const cursorPosition = activeView.editor.posToOffset(cursor);
-          if (cursorPosition !== lastCursorPosition) {
-            const positionDiff = Math.abs(cursorPosition - lastCursorPosition);
-            console.log("DashReader: Cursor moved from", lastCursorPosition, "to", cursorPosition, "(diff:", positionDiff, ")");
-            console.log("DashReader: Reloading from cursor position", cursorPosition, "in", fileName);
-            this.loadText(fullContent, { fileName, cursorPosition });
-            lastSelection = "";
-            lastCursorPosition = cursorPosition;
-          }
-        }
+        this.minimapManager.hide();
       }
-    };
+    }
+  }
+  /**
+   * Toggle breadcrumb visibility
+   */
+  toggleBreadcrumbDisplay() {
+    const shouldHide = !this.settings.showBreadcrumb;
+    if (this.breadcrumbEl) {
+      this.breadcrumbEl.toggleClass(CSS_CLASSES.hidden, shouldHide);
+    }
+  }
+  /**
+   * Opens DashReader in a new tab (fullscreen-like experience)
+   * Creates a new leaf/tab and transfers the current reading session to it
+   */
+  async openInNewTab() {
+    const { workspace } = this.app;
+    const newLeaf = workspace.getLeaf("tab");
+    if (newLeaf) {
+      await newLeaf.setViewState({
+        type: VIEW_TYPE_DASHREADER,
+        active: true
+      });
+      workspace.revealLeaf(newLeaf);
+    }
+  }
+  // ============================================================================
+  // SECTION 5: AUTO-LOAD SYSTEM
+  // ============================================================================
+  /**
+   * Sets up automatic text loading from editor
+   *
+   * Registers event handlers for:
+   * - file-open: Load text when opening a file
+   * - active-leaf-change: Load text when switching files
+   * - mouseup: Check for selection/cursor changes
+   * - keyup: Check for navigation/selection keys
+   *
+   * Actual tracking logic is encapsulated in AutoLoadManager
+   */
+  setupAutoLoad() {
     this.registerEvent(
       this.app.workspace.on("file-open", (file) => {
         if (!file)
           return;
-        lastSelection = "";
-        lastFilePath = file.path;
-        lastCursorPosition = -1;
-        console.log("DashReader: File opened:", file.path);
-        setTimeout(() => {
-          if (!this.mainContainerEl.isShown())
-            return;
-          const activeView = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
-          if (activeView) {
-            const fileName = file.name;
-            if (activeView.editor.somethingSelected()) {
-              const selection = activeView.editor.getSelection();
-              if (selection && selection.length > 30) {
-                const cursor = activeView.editor.getCursor("from");
-                const lineNumber = cursor.line + 1;
-                console.log("DashReader: Auto-loading selection", selection.length, "characters from line", lineNumber);
-                this.loadText(selection, { fileName, lineNumber });
-                return;
-              }
-            }
-            const fullContent = activeView.editor.getValue();
-            if (fullContent && fullContent.trim().length > 50) {
-              const cursor = activeView.editor.getCursor();
-              const cursorPosition = activeView.editor.posToOffset(cursor);
-              console.log("DashReader: Auto-loading entire page from cursor position", cursorPosition);
-              this.loadText(fullContent, { fileName, cursorPosition });
-            }
-          }
-        }, 300);
+        this.autoLoadManager.resetForNewFile(file.path);
+        this.autoLoadManager.loadFromEditor(TIMING.autoLoadDelay);
       })
     );
     this.registerEvent(
-      this.app.workspace.on("active-leaf-change", (leaf) => {
-        if (!this.mainContainerEl || !this.mainContainerEl.isShown()) {
+      this.app.workspace.on("active-leaf-change", () => {
+        if (!this.mainContainerEl || !this.mainContainerEl.isShown())
           return;
-        }
-        console.log("DashReader: Active leaf changed");
-        const activeView = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
-        if (activeView) {
-          const currentFile = this.app.workspace.getActiveFile();
-          if (currentFile && currentFile.path !== lastFilePath) {
-            lastSelection = "";
-            lastFilePath = currentFile.path;
-            lastCursorPosition = -1;
-            setTimeout(() => {
-              if (!this.mainContainerEl.isShown())
-                return;
-              const fileName = currentFile.name;
-              if (activeView.editor.somethingSelected()) {
-                const selection = activeView.editor.getSelection();
-                if (selection && selection.length > 30) {
-                  const cursor = activeView.editor.getCursor("from");
-                  const lineNumber = cursor.line + 1;
-                  this.loadText(selection, { fileName, lineNumber });
-                  return;
-                }
-              }
-              const fullContent = activeView.editor.getValue();
-              if (fullContent && fullContent.trim().length > 50) {
-                const cursor = activeView.editor.getCursor();
-                const cursorPosition = activeView.editor.posToOffset(cursor);
-                this.loadText(fullContent, { fileName, cursorPosition });
-              }
-            }, 200);
-          }
+        const currentFile = this.app.workspace.getActiveFile();
+        if (currentFile && this.autoLoadManager.hasFileChanged(currentFile.path)) {
+          this.autoLoadManager.resetForNewFile(currentFile.path);
+          this.autoLoadManager.loadFromEditor(TIMING.autoLoadDelayShort);
         }
       })
     );
     this.registerDomEvent(document, "mouseup", () => {
-      console.log("DashReader: Mouse click detected");
-      setTimeout(() => {
+      this.timeoutManager.setTimeout(() => {
         if (this.mainContainerEl.isShown()) {
-          checkSelectionOrCursor();
+          this.autoLoadManager.checkSelectionOrCursor();
         }
-      }, 50);
+      }, TIMING.autoLoadDelayVeryShort);
     });
     this.registerDomEvent(document, "keyup", (evt) => {
-      const isNavigationKey = (
-        // Touches fléchées
-        evt.key === "ArrowUp" || evt.key === "ArrowDown" || evt.key === "ArrowLeft" || evt.key === "ArrowRight" || // Home/End/PageUp/PageDown
-        evt.key === "Home" || evt.key === "End" || evt.key === "PageUp" || evt.key === "PageDown" || // Enter pour nouvelle ligne
-        evt.key === "Enter" || // Vim-style (j/k pour bas/haut)
-        evt.key === "j" && evt.ctrlKey || evt.key === "k" && evt.ctrlKey || evt.key === "d" && evt.ctrlKey || evt.key === "u" && evt.ctrlKey || // Cmd/Ctrl + flèches
-        (evt.key === "ArrowUp" || evt.key === "ArrowDown") && (evt.metaKey || evt.ctrlKey)
-      );
-      const isSelectionKey = evt.shiftKey || evt.key === "a" && (evt.metaKey || evt.ctrlKey);
-      if (isNavigationKey || isSelectionKey) {
-        console.log("DashReader: Navigation key detected:", evt.key, "with modifiers:", {
-          shift: evt.shiftKey,
-          ctrl: evt.ctrlKey,
-          meta: evt.metaKey
-        });
-        setTimeout(() => {
+      if (isNavigationKey(evt) || isSelectionKey(evt)) {
+        this.timeoutManager.setTimeout(() => {
           if (this.mainContainerEl.isShown()) {
-            checkSelectionOrCursor();
+            this.autoLoadManager.checkSelectionOrCursor();
           }
-        }, 50);
+        }, TIMING.autoLoadDelayVeryShort);
       }
     });
-    console.log("DashReader: Auto-load setup complete (with file-open event)");
   }
+  // ============================================================================
+  // SECTION 6: HOTKEYS & KEYBOARD
+  // ============================================================================
+  /**
+   * Sets up keyboard shortcuts for playback control
+   */
   setupHotkeys() {
     document.addEventListener("keydown", this.handleKeyPress.bind(this));
   }
+  /**
+   * Handles keyboard shortcuts
+   *
+   * Shortcuts:
+   * - C: Toggle controls (when not playing)
+   * - S: Toggle stats (when not playing)
+   * - Shift+Space: Play/Pause
+   * - Arrow keys: Rewind/Forward, WPM adjustment
+   * - Escape: Stop reading
+   *
+   * @param e - Keyboard event
+   */
   handleKeyPress(e) {
     if (!this.mainContainerEl.isShown())
       return;
     if (e.key === "c" && !this.engine.getIsPlaying()) {
       e.preventDefault();
-      this.toggleControls();
+      this.togglePanel("controls");
       return;
     }
     if (e.key === "s" && !this.engine.getIsPlaying()) {
       e.preventDefault();
-      this.toggleStats();
+      this.togglePanel("stats");
       return;
     }
-    const keyCode = e.code || e.key;
-    if (keyCode === "Space" && e.shiftKey) {
-      e.preventDefault();
-      console.log("DashReader: Shift+Space pressed, toggling play");
-      this.togglePlay();
-      return;
-    }
-    switch (keyCode) {
-      case this.settings.hotkeyRewind:
-        e.preventDefault();
-        this.engine.rewind();
-        break;
-      case this.settings.hotkeyForward:
-        e.preventDefault();
-        this.engine.forward();
-        break;
-      case this.settings.hotkeyIncrementWpm:
-        e.preventDefault();
-        this.changeWpm(25);
-        break;
-      case this.settings.hotkeyDecrementWpm:
-        e.preventDefault();
-        this.changeWpm(-25);
-        break;
-      case this.settings.hotkeyQuit:
-        e.preventDefault();
-        this.engine.stop();
-        break;
-    }
+    this.hotkeyHandler.handleKeyPress(e);
   }
+  /**
+   * Toggles play/pause state
+   * Updates UI buttons accordingly
+   */
   togglePlay() {
     if (this.engine.getIsPlaying()) {
       this.engine.pause();
-      this.updatePlayButton(false);
+      updatePlayPauseButtons(this.dom, false);
     } else {
-      if (this.startTime === 0) {
-        this.startTime = Date.now();
+      if (this.state.get("startTime") === 0) {
+        this.state.set("startTime", Date.now());
       }
       this.engine.play();
-      this.updatePlayButton(true);
+      updatePlayPauseButtons(this.dom, true);
     }
   }
-  updatePlayButton(isPlaying) {
-    const playBtn = this.controlsEl.querySelector(".play-btn");
-    const pauseBtn = this.controlsEl.querySelector(".pause-btn");
-    if (playBtn && pauseBtn) {
-      playBtn.toggleClass("hidden", isPlaying);
-      pauseBtn.toggleClass("hidden", !isPlaying);
-    }
-  }
-  changeWpm(delta) {
-    const newWpm = this.engine.getWpm() + delta;
-    this.engine.setWpm(newWpm);
-    this.settings.wpm = this.engine.getWpm();
-    if (this.wpmDisplayEl) {
-      this.wpmDisplayEl.setText(`${this.settings.wpm} WPM`);
-    }
-    const wpmValue = this.controlsEl.querySelector(".wpm-value");
-    if (wpmValue) {
-      wpmValue.setText(String(this.settings.wpm));
-    }
-  }
-  changeChunkSize(delta) {
-    const newSize = this.engine.getChunkSize() + delta;
-    this.engine.setChunkSize(newSize);
-    this.settings.chunkSize = this.engine.getChunkSize();
-    const chunkValue = this.controlsEl.querySelector(".chunk-value");
-    if (chunkValue) {
-      chunkValue.setText(String(this.settings.chunkSize));
-    }
-  }
-  changeFontSize(delta) {
-    this.settings.fontSize = Math.max(20, Math.min(120, this.settings.fontSize + delta));
-    this.wordEl.style.fontSize = `${this.settings.fontSize}px`;
-    const fontValue = this.settingsEl.querySelector(".font-value");
-    if (fontValue) {
-      fontValue.setText(String(this.settings.fontSize));
-    }
-  }
-  changeWpmInline(delta) {
-    const newWpm = this.engine.getWpm() + delta;
-    this.engine.setWpm(newWpm);
-    this.settings.wpm = this.engine.getWpm();
-    if (this.wpmDisplayEl) {
-      this.wpmDisplayEl.setText(`${this.settings.wpm} WPM`);
-    }
-    const wpmValueControls = this.controlsEl.querySelector(".wpm-value");
-    if (wpmValueControls) {
-      wpmValueControls.setText(String(this.settings.wpm));
-    }
-    const wpmValueInline = this.settingsEl.querySelector(".wpm-inline-value");
-    if (wpmValueInline) {
-      wpmValueInline.setText(String(this.settings.wpm));
-    }
-  }
-  changeAccelDuration(delta) {
-    this.settings.accelerationDuration = Math.max(10, Math.min(120, this.settings.accelerationDuration + delta));
-    this.engine.updateSettings(this.settings);
-    const accelDurationValue = this.settingsEl.querySelector(".accel-duration-value");
-    if (accelDurationValue) {
-      accelDurationValue.setText(String(this.settings.accelerationDuration));
-    }
-  }
-  changeAccelTarget(delta) {
-    this.settings.accelerationTargetWpm = Math.max(50, Math.min(1e3, this.settings.accelerationTargetWpm + delta));
-    this.engine.updateSettings(this.settings);
-    const accelTargetValue = this.settingsEl.querySelector(".accel-target-value");
-    if (accelTargetValue) {
-      accelTargetValue.setText(String(this.settings.accelerationTargetWpm));
-    }
-  }
+  // ============================================================================
+  // SECTION 7: READING ENGINE CALLBACKS
+  // ============================================================================
+  /**
+   * Called by engine when a new word is displayed
+   * Updates the UI with the current word, context, progress, and stats
+   *
+   * @param chunk - Word chunk with text, index, delay info
+   */
   onWordChange(chunk) {
-    var _a;
     const headingMatch = chunk.text.match(/^\[H(\d)\]/);
+    const calloutMatch = chunk.text.match(/^\[CALLOUT:([\w-]+)\]/);
     let displayText = chunk.text;
     let headingLevel = 0;
     let showSeparator = false;
+    let calloutType;
     if (headingMatch) {
       headingLevel = parseInt(headingMatch[1]);
       displayText = chunk.text.replace(/^\[H\d\]/, "");
       showSeparator = true;
-      console.log("DashReader: Heading detected - Level", headingLevel, "Text:", displayText);
+    } else if (calloutMatch) {
+      calloutType = calloutMatch[1];
+      displayText = chunk.text.replace(/^\[CALLOUT:[\w-]+\]/, "");
+      showSeparator = true;
     }
-    this.displayWordWithHeading(displayText, headingLevel, showSeparator);
+    this.wordDisplay.displayWord(displayText, headingLevel, showSeparator, calloutType);
+    if (chunk.headingContext && this.breadcrumbManager) {
+      if (this.breadcrumbManager.hasHeadingContextChanged(chunk.headingContext)) {
+        this.breadcrumbManager.updateBreadcrumb(chunk.headingContext);
+      }
+    }
+    if (this.minimapManager) {
+      this.minimapManager.updateCurrentPosition(chunk.index);
+    }
     if (this.settings.showContext && this.contextBeforeEl && this.contextAfterEl) {
       const context = this.engine.getContext(this.settings.contextWords);
       this.contextBeforeEl.setText(context.before.join(" "));
       this.contextAfterEl.setText(context.after.join(" "));
     }
     const progress = this.engine.getProgress();
-    const progressBar = (_a = this.progressEl) == null ? void 0 : _a.querySelector(".dashreader-progress-bar");
-    if (progressBar) {
-      progressBar.style.width = `${progress}%`;
-    }
-    this.wordsRead++;
+    this.dom.updateStyle("progressBar", "width", `${progress}%`);
+    this.state.increment("wordsRead");
     this.updateStats();
   }
-  displayWordWithHeading(word, headingLevel, showSeparator = false) {
-    let fontSizeMultiplier = 1;
-    if (headingLevel > 0) {
-      const multipliers = [0, 2, 1.75, 1.5, 1.25, 1.1, 1];
-      fontSizeMultiplier = multipliers[headingLevel] || 1;
-    }
-    const adjustedFontSize = this.settings.fontSize * fontSizeMultiplier;
-    const processedWord = this.processWord(word);
-    const separator = showSeparator ? `<div style="width: 60%; height: 2px; background: var(--text-muted); opacity: 0.4; margin: 0 auto 20px auto;"></div>` : "";
-    this.wordEl.innerHTML = `
-      ${separator}
-      <div style="font-size: ${adjustedFontSize}px; transition: font-size 0.3s ease; font-weight: ${headingLevel > 0 ? "bold" : "normal"};">
-        ${processedWord}
-      </div>
-    `;
-  }
-  escapeHtml(text) {
-    return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
-  }
-  processWord(word) {
-    const cleanWord = word.trim();
-    const center = Math.max(Math.floor(cleanWord.length / 2) - 1, 0);
-    let result = "";
-    for (let i = 0; i < cleanWord.length; i++) {
-      const escapedChar = this.escapeHtml(cleanWord[i]);
-      if (i === center) {
-        result += `<span class="dashreader-highlight" style="color: ${this.settings.highlightColor}">${escapedChar}</span>`;
-      } else {
-        result += escapedChar;
-      }
-    }
-    return result;
-  }
+  /**
+   * Called by engine when reading is complete
+   * Updates UI to show completion message
+   */
   onComplete() {
-    var _a;
-    this.updatePlayButton(false);
-    const statsText = (_a = this.statsEl) == null ? void 0 : _a.querySelector(".dashreader-stats-text");
-    if (statsText) {
-      statsText.setText("Completed! \u{1F389}");
-    }
+    updatePlayPauseButtons(this.dom, false);
+    this.dom.updateText("statsText", `Completed! ${ICONS.celebration}`);
   }
+  /**
+   * Updates the stats display with current reading statistics
+   * Shows: words read, elapsed time, current WPM, remaining time
+   */
   updateStats() {
-    var _a;
-    const statsText = (_a = this.statsEl) == null ? void 0 : _a.querySelector(".dashreader-stats-text");
-    if (!statsText)
-      return;
-    const elapsed = this.engine.getElapsedTime();
-    const currentWpm = this.engine.getCurrentWpmPublic();
-    const remaining = this.engine.getRemainingTime();
-    statsText.setText(
-      `${this.wordsRead}/${this.engine.getTotalWords()} words | ${this.formatTime(elapsed)} | ${currentWpm} WPM | ${this.formatTime(remaining)} left`
-    );
+    const statsText = this.statsFormatter.formatReadingStats({
+      wordsRead: this.state.get("wordsRead"),
+      totalWords: this.engine.getTotalWords(),
+      elapsedTime: this.engine.getElapsedTime(),
+      currentWpm: this.engine.getCurrentWpmPublic(),
+      remainingTime: this.engine.getRemainingTime()
+    });
+    this.dom.updateText("statsText", statsText);
   }
-  formatTime(seconds) {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, "0")}`;
-  }
-  loadText(text, source) {
-    var _a;
-    console.log("DashReader: loadText called with source:", source);
-    if (this.engine.getIsPlaying()) {
-      this.engine.stop();
-      this.updatePlayButton(false);
-      console.log("DashReader: Stopped current reading");
-    }
-    console.log("DashReader: Parsing markdown, original length:", text.length);
+  // ============================================================================
+  // SECTION 8: TEXT LOADING
+  // ============================================================================
+  /**
+   * Parses markdown and calculates start position from cursor
+   *
+   * @param text - Raw markdown text
+   * @param cursorPosition - Optional cursor position in raw text
+   * @returns Object with plainText and wordIndex
+   */
+  parseAndCalculateStartPosition(text, cursorPosition) {
     const plainText = MarkdownParser.parseToPlainText(text);
-    console.log("DashReader: After parsing, length:", plainText.length);
-    console.log("DashReader: First 100 chars:", plainText.substring(0, 100));
-    let wordIndexFromCursor;
-    if ((source == null ? void 0 : source.cursorPosition) !== void 0) {
-      console.log("DashReader: Cursor position detected:", source.cursorPosition);
-      const textUpToCursor = text.substring(0, source.cursorPosition);
+    let wordIndex;
+    if (cursorPosition !== void 0) {
+      const textUpToCursor = text.substring(0, cursorPosition);
       const parsedUpToCursor = MarkdownParser.parseToPlainText(textUpToCursor);
       const wordsBeforeCursor = parsedUpToCursor.trim().split(/\s+/).filter((w) => w.length > 0);
-      wordIndexFromCursor = wordsBeforeCursor.length;
-      console.log("DashReader: Original text up to cursor:", textUpToCursor.length, "chars");
-      console.log("DashReader: Parsed text up to cursor:", parsedUpToCursor.length, "chars");
-      console.log("DashReader: Words before cursor (after parsing):", wordsBeforeCursor.slice(0, 10), "...");
-      console.log("DashReader: Cursor at character", source.cursorPosition, "\u2192 word index", wordIndexFromCursor, "(in parsed text)");
-    } else {
-      console.log("DashReader: No cursor position provided");
+      wordIndex = wordsBeforeCursor.length;
     }
-    if (!plainText || plainText.trim().length < 10) {
-      console.log("DashReader: Text too short after parsing");
+    return { plainText, wordIndex };
+  }
+  /**
+   * Updates stats display and word display with ready message
+   *
+   * @param wordIndex - Starting word index (if resuming from cursor)
+   * @param source - Optional source information (filename, line number)
+   */
+  updateStatsDisplay(wordIndex, source) {
+    const statsText = this.statsFormatter.formatLoadedStats({
+      remainingWords: this.engine.getRemainingWords(),
+      totalWords: this.engine.getTotalWords(),
+      estimatedDuration: this.engine.getEstimatedDuration(),
+      fileName: source == null ? void 0 : source.fileName,
+      startWordIndex: wordIndex
+    });
+    this.dom.updateText("statsText", statsText);
+    const durationText = this.statsFormatter.formatTime(this.engine.getEstimatedDuration());
+    this.wordDisplay.displayReadyMessage(
+      this.engine.getRemainingWords(),
+      this.engine.getTotalWords(),
+      wordIndex,
+      durationText,
+      source == null ? void 0 : source.fileName,
+      source == null ? void 0 : source.lineNumber
+    );
+  }
+  /**
+   * Builds and displays initial breadcrumb based on starting position
+   *
+   * @param wordIndex - Starting word index (0 if starting from beginning)
+   */
+  buildInitialBreadcrumb(wordIndex) {
+    const context = this.engine.getCurrentHeadingContext(wordIndex);
+    if (context.breadcrumb.length > 0) {
+      this.breadcrumbManager.updateBreadcrumb(context);
+    }
+  }
+  /**
+   * Handles auto-start functionality if enabled in settings
+   * Starts reading after the configured delay
+   */
+  handleAutoStart() {
+    if (!this.settings.autoStart)
+      return;
+    this.timeoutManager.setTimeout(() => {
+      this.engine.play();
+      updatePlayPauseButtons(this.dom, true);
+      this.state.set("startTime", Date.now());
+    }, this.settings.autoStartDelay * 1e3);
+  }
+  /**
+   * Loads text for reading
+   *
+   * Process:
+   * 1. Stop current reading if playing
+   * 2. Parse markdown to plain text
+   * 3. Calculate word index from cursor position (if provided)
+   * 4. Validate text length
+   * 5. Load into engine
+   * 6. Update UI with ready message
+   * 7. Auto-start if enabled
+   *
+   * @param text - Text to load (raw markdown)
+   * @param source - Optional source information (filename, line, cursor position)
+   */
+  loadText(text, source) {
+    if (this.engine.getIsPlaying()) {
+      this.engine.stop();
+      updatePlayPauseButtons(this.dom, false);
+    }
+    this.breadcrumbManager.reset();
+    const { plainText, wordIndex: wordIndexFromCursor } = this.parseAndCalculateStartPosition(
+      text,
+      source == null ? void 0 : source.cursorPosition
+    );
+    if (!plainText || plainText.trim().length < TEXT_LIMITS.minParsedLength) {
       return;
     }
     this.engine.setText(plainText, void 0, wordIndexFromCursor);
-    this.wordsRead = 0;
-    this.startTime = 0;
-    const welcomeMsg = this.wordEl.querySelector(".dashreader-welcome");
+    this.state.update({ wordsRead: 0, startTime: 0 });
+    const welcomeMsg = this.wordEl.querySelector(`.${CSS_CLASSES.welcome}`);
     if (welcomeMsg) {
       welcomeMsg.remove();
     }
-    this.wordEl.innerHTML = "";
-    let sourceInfo = "";
-    if (source == null ? void 0 : source.fileName) {
-      const escapedFileName = this.escapeHtml(source.fileName);
-      const lineInfo = source.lineNumber ? ` (line ${source.lineNumber})` : "";
-      sourceInfo = `<div style="font-size: 14px; opacity: 0.6; margin-bottom: 8px;">
-        \u{1F4C4} ${escapedFileName}${lineInfo}
-      </div>`;
-    }
-    const totalWords = this.engine.getTotalWords();
-    const remainingWords = this.engine.getRemainingWords();
-    const estimatedDuration = this.engine.getEstimatedDuration();
-    const durationText = this.formatTime(estimatedDuration);
-    const statsText = (_a = this.statsEl) == null ? void 0 : _a.querySelector(".dashreader-stats-text");
-    if (statsText) {
-      const fileInfo = (source == null ? void 0 : source.fileName) ? ` from ${source.fileName}` : "";
-      const wordInfo = wordIndexFromCursor && wordIndexFromCursor > 0 ? `${remainingWords}/${totalWords} words` : `${totalWords} words`;
-      statsText.setText(`${wordInfo} loaded${fileInfo} - ~${durationText} - Shift+Space to start`);
-    }
-    const startInfo = wordIndexFromCursor !== void 0 && wordIndexFromCursor > 0 ? ` <span style="opacity: 0.6;">(starting at word ${wordIndexFromCursor + 1}/${totalWords})</span>` : "";
-    console.log("DashReader: Start info display:", startInfo);
-    console.log("DashReader: Words to read:", remainingWords, "out of", totalWords);
-    this.wordEl.innerHTML = `
-      <div style="font-size: 18px; color: var(--text-muted); text-align: center;">
-        ${sourceInfo}
-        Ready to read ${remainingWords} words${startInfo}<br/>
-        <span style="font-size: 14px; opacity: 0.7;">Estimated time: ~${durationText}</span><br/>
-        <span style="font-size: 14px; opacity: 0.7;">Press Shift+Space to start</span>
-      </div>
-    `;
-    if (this.settings.autoStart) {
-      setTimeout(() => {
-        this.engine.play();
-        this.updatePlayButton(true);
-        this.startTime = Date.now();
-      }, this.settings.autoStartDelay * 1e3);
-    }
+    this.wordEl.empty();
+    this.updateStatsDisplay(wordIndexFromCursor, source);
+    this.buildInitialBreadcrumb(wordIndexFromCursor != null ? wordIndexFromCursor : 0);
+    this.minimapManager.render();
+    this.handleAutoStart();
   }
+  // ============================================================================
+  // SECTION 9: SETTINGS & LIFECYCLE
+  // ============================================================================
+  /**
+   * Updates settings from plugin settings tab
+   * Called when user changes settings in main settings panel
+   *
+   * @param settings - New settings
+   */
   updateSettings(settings) {
     this.settings = settings;
     this.engine.updateSettings(settings);
@@ -972,110 +3211,309 @@ var DashReaderView = class extends import_obsidian.ItemView {
       this.wordEl.style.fontFamily = settings.fontFamily;
       this.wordEl.style.color = settings.fontColor;
     }
-    if (this.wpmDisplayEl) {
-      this.wpmDisplayEl.setText(`${settings.wpm} WPM`);
-    }
-  }
-  async onClose() {
-    this.engine.stop();
+    this.dom.updateText("wpmDisplay", `${settings.wpm} WPM`);
   }
 };
 
 // src/settings.ts
-var import_obsidian2 = require("obsidian");
-var DashReaderSettingTab = class extends import_obsidian2.PluginSettingTab {
+var import_obsidian3 = require("obsidian");
+var DashReaderSettingTab = class extends import_obsidian3.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
+  }
+  /**
+   * Helper method to create a slider with an editable numeric display
+   */
+  createSliderWithInput(setting, min, max, step, value, unit = "", onChange) {
+    let inputEl;
+    setting.addSlider((slider) => slider.setLimits(min, max, step).setValue(value).setDynamicTooltip().onChange(async (newValue) => {
+      inputEl.value = newValue.toString();
+      await onChange(newValue);
+    }));
+    inputEl = setting.controlEl.createEl("input", {
+      type: "text",
+      value: value.toString(),
+      cls: "dashreader-slider-input"
+    });
+    if (unit) {
+      setting.controlEl.createSpan({
+        text: unit,
+        cls: "dashreader-slider-unit"
+      });
+    }
+    inputEl.addEventListener("change", async () => {
+      let newValue = parseFloat(inputEl.value);
+      if (isNaN(newValue)) {
+        newValue = value;
+      } else {
+        newValue = Math.max(min, Math.min(max, newValue));
+        newValue = Math.round(newValue / step) * step;
+      }
+      inputEl.value = newValue.toString();
+      const sliderEl = setting.controlEl.querySelector('input[type="range"]');
+      if (sliderEl) {
+        sliderEl.value = newValue.toString();
+      }
+      await onChange(newValue);
+    });
   }
   display() {
     const { containerEl } = this;
     containerEl.empty();
     containerEl.createEl("h2", { text: "DashReader Settings" });
     containerEl.createEl("h3", { text: "Reading Settings" });
-    new import_obsidian2.Setting(containerEl).setName("Words per minute (WPM)").setDesc("Reading speed (50-1000)").addSlider((slider) => slider.setLimits(50, 1e3, 25).setValue(this.plugin.settings.wpm).setDynamicTooltip().onChange(async (value) => {
-      this.plugin.settings.wpm = value;
-      await this.plugin.saveSettings();
-    }));
-    new import_obsidian2.Setting(containerEl).setName("Words at a time").setDesc("Number of words displayed simultaneously (1-5)").addSlider((slider) => slider.setLimits(1, 5, 1).setValue(this.plugin.settings.chunkSize).setDynamicTooltip().onChange(async (value) => {
-      this.plugin.settings.chunkSize = value;
-      await this.plugin.saveSettings();
-    }));
-    new import_obsidian2.Setting(containerEl).setName("Font size").setDesc("Font size in pixels (20-120px)").addSlider((slider) => slider.setLimits(20, 120, 4).setValue(this.plugin.settings.fontSize).setDynamicTooltip().onChange(async (value) => {
-      this.plugin.settings.fontSize = value;
-      await this.plugin.saveSettings();
-    }));
-    new import_obsidian2.Setting(containerEl).setName("Font family").setDesc("Font family for text display").addDropdown((dropdown) => dropdown.addOption("inherit", "Default").addOption("monospace", "Monospace").addOption("serif", "Serif").addOption("sans-serif", "Sans-serif").setValue(this.plugin.settings.fontFamily).onChange(async (value) => {
+    const wpmSetting = new import_obsidian3.Setting(containerEl).setName("Words per minute (WPM)").setDesc("Reading speed (50-5000)");
+    this.createSliderWithInput(
+      wpmSetting,
+      50,
+      5e3,
+      25,
+      this.plugin.settings.wpm,
+      "",
+      async (value) => {
+        this.plugin.settings.wpm = value;
+        await this.plugin.saveSettings();
+      }
+    );
+    const chunkSetting = new import_obsidian3.Setting(containerEl).setName("Words at a time").setDesc("Number of words displayed simultaneously (1-5)");
+    this.createSliderWithInput(
+      chunkSetting,
+      1,
+      5,
+      1,
+      this.plugin.settings.chunkSize,
+      "",
+      async (value) => {
+        this.plugin.settings.chunkSize = value;
+        await this.plugin.saveSettings();
+      }
+    );
+    const fontSizeSetting = new import_obsidian3.Setting(containerEl).setName("Font size").setDesc("Font size in pixels (20-120px)");
+    this.createSliderWithInput(
+      fontSizeSetting,
+      20,
+      120,
+      4,
+      this.plugin.settings.fontSize,
+      "px",
+      async (value) => {
+        this.plugin.settings.fontSize = value;
+        await this.plugin.saveSettings();
+      }
+    );
+    new import_obsidian3.Setting(containerEl).setName("Font family").setDesc("Font family for text display").addDropdown((dropdown) => dropdown.addOption("inherit", "Default").addOption("monospace", "Monospace").addOption("serif", "Serif").addOption("sans-serif", "Sans-serif").setValue(this.plugin.settings.fontFamily).onChange(async (value) => {
       this.plugin.settings.fontFamily = value;
       await this.plugin.saveSettings();
     }));
-    containerEl.createEl("h3", { text: "Speed Acceleration" });
-    new import_obsidian2.Setting(containerEl).setName("Enable acceleration").setDesc("Gradually increase reading speed over time").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableAcceleration).onChange(async (value) => {
+    containerEl.createEl("h3", { text: "Reading Enhancements" });
+    new import_obsidian3.Setting(containerEl).setName("Slow Start").setDesc("Gradually increase speed over first 5 words for comfortable start").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableSlowStart).onChange(async (value) => {
+      this.plugin.settings.enableSlowStart = value;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian3.Setting(containerEl).setName("Enable acceleration").setDesc("Gradually increase reading speed over time").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableAcceleration).onChange(async (value) => {
       this.plugin.settings.enableAcceleration = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian2.Setting(containerEl).setName("Acceleration duration").setDesc("Duration to reach target speed (seconds)").addSlider((slider) => slider.setLimits(10, 120, 5).setValue(this.plugin.settings.accelerationDuration).setDynamicTooltip().onChange(async (value) => {
-      this.plugin.settings.accelerationDuration = value;
-      await this.plugin.saveSettings();
-    }));
-    new import_obsidian2.Setting(containerEl).setName("Target WPM").setDesc("Target reading speed to reach (50-1000)").addSlider((slider) => slider.setLimits(50, 1e3, 25).setValue(this.plugin.settings.accelerationTargetWpm).setDynamicTooltip().onChange(async (value) => {
-      this.plugin.settings.accelerationTargetWpm = value;
-      await this.plugin.saveSettings();
-    }));
+    const accelDurationSetting = new import_obsidian3.Setting(containerEl).setName("Acceleration duration").setDesc("Duration to reach target speed (seconds)");
+    this.createSliderWithInput(
+      accelDurationSetting,
+      10,
+      120,
+      5,
+      this.plugin.settings.accelerationDuration,
+      "s",
+      async (value) => {
+        this.plugin.settings.accelerationDuration = value;
+        await this.plugin.saveSettings();
+      }
+    );
+    const accelTargetSetting = new import_obsidian3.Setting(containerEl).setName("Target WPM").setDesc("Target reading speed to reach (50-5000)");
+    this.createSliderWithInput(
+      accelTargetSetting,
+      50,
+      5e3,
+      25,
+      this.plugin.settings.accelerationTargetWpm,
+      "",
+      async (value) => {
+        this.plugin.settings.accelerationTargetWpm = value;
+        await this.plugin.saveSettings();
+      }
+    );
     containerEl.createEl("h3", { text: "Appearance" });
-    new import_obsidian2.Setting(containerEl).setName("Highlight color").setDesc("Color for the center character highlight").addText((text) => text.setPlaceholder("#4a9eff").setValue(this.plugin.settings.highlightColor).onChange(async (value) => {
+    new import_obsidian3.Setting(containerEl).setName("Highlight color").setDesc("Color for the center character highlight").addText((text) => text.setPlaceholder("#4a9eff").setValue(this.plugin.settings.highlightColor).onChange(async (value) => {
       this.plugin.settings.highlightColor = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian2.Setting(containerEl).setName("Font color").setDesc("Text color").addText((text) => text.setPlaceholder("#ffffff").setValue(this.plugin.settings.fontColor).onChange(async (value) => {
+    new import_obsidian3.Setting(containerEl).setName("Font color").setDesc("Text color").addText((text) => text.setPlaceholder("#ffffff").setValue(this.plugin.settings.fontColor).onChange(async (value) => {
       this.plugin.settings.fontColor = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian2.Setting(containerEl).setName("Background color").setDesc("Background color").addText((text) => text.setPlaceholder("#1e1e1e").setValue(this.plugin.settings.backgroundColor).onChange(async (value) => {
+    new import_obsidian3.Setting(containerEl).setName("Background color").setDesc("Background color").addText((text) => text.setPlaceholder("#1e1e1e").setValue(this.plugin.settings.backgroundColor).onChange(async (value) => {
       this.plugin.settings.backgroundColor = value;
       await this.plugin.saveSettings();
     }));
     containerEl.createEl("h3", { text: "Context Display" });
-    new import_obsidian2.Setting(containerEl).setName("Show context").setDesc("Display words before and after current word").addToggle((toggle) => toggle.setValue(this.plugin.settings.showContext).onChange(async (value) => {
+    new import_obsidian3.Setting(containerEl).setName("Show context").setDesc("Display words before and after current word").addToggle((toggle) => toggle.setValue(this.plugin.settings.showContext).onChange(async (value) => {
       this.plugin.settings.showContext = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian2.Setting(containerEl).setName("Context words").setDesc("Number of context words to display (1-10)").addSlider((slider) => slider.setLimits(1, 10, 1).setValue(this.plugin.settings.contextWords).setDynamicTooltip().onChange(async (value) => {
-      this.plugin.settings.contextWords = value;
+    const contextSetting = new import_obsidian3.Setting(containerEl).setName("Context words").setDesc("Number of context words to display (1-10)");
+    this.createSliderWithInput(
+      contextSetting,
+      1,
+      10,
+      1,
+      this.plugin.settings.contextWords,
+      "",
+      async (value) => {
+        this.plugin.settings.contextWords = value;
+        await this.plugin.saveSettings();
+      }
+    );
+    containerEl.createEl("h3", { text: "Navigation" });
+    new import_obsidian3.Setting(containerEl).setName("Show minimap").setDesc("Display vertical minimap with document structure and progress").addToggle((toggle) => toggle.setValue(this.plugin.settings.showMinimap).onChange(async (value) => {
+      this.plugin.settings.showMinimap = value;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian3.Setting(containerEl).setName("Show breadcrumb").setDesc("Display breadcrumb navigation at the top").addToggle((toggle) => toggle.setValue(this.plugin.settings.showBreadcrumb).onChange(async (value) => {
+      this.plugin.settings.showBreadcrumb = value;
       await this.plugin.saveSettings();
     }));
     containerEl.createEl("h3", { text: "Micropause" });
-    new import_obsidian2.Setting(containerEl).setName("Enable micropause").setDesc("Automatic pauses based on punctuation and word length").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableMicropause).onChange(async (value) => {
+    new import_obsidian3.Setting(containerEl).setName("Enable micropause").setDesc("Automatic pauses based on punctuation and word length").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableMicropause).onChange(async (value) => {
       this.plugin.settings.enableMicropause = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian2.Setting(containerEl).setName("Punctuation pause").setDesc("Pause multiplier for punctuation (1.0-3.0)").addSlider((slider) => slider.setLimits(1, 3, 0.1).setValue(this.plugin.settings.micropausePunctuation).setDynamicTooltip().onChange(async (value) => {
-      this.plugin.settings.micropausePunctuation = value;
-      await this.plugin.saveSettings();
-    }));
-    new import_obsidian2.Setting(containerEl).setName("Long words pause").setDesc("Pause multiplier for long words (1.0-2.0)").addSlider((slider) => slider.setLimits(1, 2, 0.1).setValue(this.plugin.settings.micropauseLongWords).setDynamicTooltip().onChange(async (value) => {
-      this.plugin.settings.micropauseLongWords = value;
-      await this.plugin.saveSettings();
-    }));
-    new import_obsidian2.Setting(containerEl).setName("Paragraph pause").setDesc("Pause multiplier for paragraph breaks (1.0-5.0)").addSlider((slider) => slider.setLimits(1, 5, 0.5).setValue(this.plugin.settings.micropauseParagraph).setDynamicTooltip().onChange(async (value) => {
-      this.plugin.settings.micropauseParagraph = value;
-      await this.plugin.saveSettings();
-    }));
+    const punctuationSetting = new import_obsidian3.Setting(containerEl).setName("Sentence-ending punctuation pause").setDesc("Pause multiplier for .,!? (1.0-3.0)");
+    this.createSliderWithInput(
+      punctuationSetting,
+      1,
+      3,
+      0.1,
+      this.plugin.settings.micropausePunctuation,
+      "x",
+      async (value) => {
+        this.plugin.settings.micropausePunctuation = value;
+        await this.plugin.saveSettings();
+      }
+    );
+    const otherPunctuationSetting = new import_obsidian3.Setting(containerEl).setName("Other punctuation pause").setDesc("Pause multiplier for ;:, (1.0-3.0)");
+    this.createSliderWithInput(
+      otherPunctuationSetting,
+      1,
+      3,
+      0.1,
+      this.plugin.settings.micropauseOtherPunctuation,
+      "x",
+      async (value) => {
+        this.plugin.settings.micropauseOtherPunctuation = value;
+        await this.plugin.saveSettings();
+      }
+    );
+    const longWordsSetting = new import_obsidian3.Setting(containerEl).setName("Long words pause").setDesc("Pause multiplier for long words >8 chars (1.0-2.0)");
+    this.createSliderWithInput(
+      longWordsSetting,
+      1,
+      2,
+      0.1,
+      this.plugin.settings.micropauseLongWords,
+      "x",
+      async (value) => {
+        this.plugin.settings.micropauseLongWords = value;
+        await this.plugin.saveSettings();
+      }
+    );
+    const paragraphSetting = new import_obsidian3.Setting(containerEl).setName("Paragraph pause").setDesc("Pause multiplier for paragraph breaks (1.0-5.0)");
+    this.createSliderWithInput(
+      paragraphSetting,
+      1,
+      5,
+      0.1,
+      this.plugin.settings.micropauseParagraph,
+      "x",
+      async (value) => {
+        this.plugin.settings.micropauseParagraph = value;
+        await this.plugin.saveSettings();
+      }
+    );
+    const numbersSetting = new import_obsidian3.Setting(containerEl).setName("Numbers pause").setDesc("Pause multiplier for numbers and dates (1.0-3.0)");
+    this.createSliderWithInput(
+      numbersSetting,
+      1,
+      3,
+      0.1,
+      this.plugin.settings.micropauseNumbers,
+      "x",
+      async (value) => {
+        this.plugin.settings.micropauseNumbers = value;
+        await this.plugin.saveSettings();
+      }
+    );
+    const sectionMarkersSetting = new import_obsidian3.Setting(containerEl).setName("Section markers pause").setDesc("Pause multiplier for 1., I., A., etc. (1.0-3.0)");
+    this.createSliderWithInput(
+      sectionMarkersSetting,
+      1,
+      3,
+      0.1,
+      this.plugin.settings.micropauseSectionMarkers,
+      "x",
+      async (value) => {
+        this.plugin.settings.micropauseSectionMarkers = value;
+        await this.plugin.saveSettings();
+      }
+    );
+    const listBulletsSetting = new import_obsidian3.Setting(containerEl).setName("List bullets pause").setDesc("Pause multiplier for -, *, +, \u2022 (1.0-3.0)");
+    this.createSliderWithInput(
+      listBulletsSetting,
+      1,
+      3,
+      0.1,
+      this.plugin.settings.micropauseListBullets,
+      "x",
+      async (value) => {
+        this.plugin.settings.micropauseListBullets = value;
+        await this.plugin.saveSettings();
+      }
+    );
+    const calloutsSetting = new import_obsidian3.Setting(containerEl).setName("Callouts pause").setDesc("Pause multiplier for Obsidian callouts (1.0-3.0)");
+    this.createSliderWithInput(
+      calloutsSetting,
+      1,
+      3,
+      0.1,
+      this.plugin.settings.micropauseCallouts,
+      "x",
+      async (value) => {
+        this.plugin.settings.micropauseCallouts = value;
+        await this.plugin.saveSettings();
+      }
+    );
     containerEl.createEl("h3", { text: "Auto-start" });
-    new import_obsidian2.Setting(containerEl).setName("Auto-start reading").setDesc("Automatically start reading after text loads").addToggle((toggle) => toggle.setValue(this.plugin.settings.autoStart).onChange(async (value) => {
+    new import_obsidian3.Setting(containerEl).setName("Auto-start reading").setDesc("Automatically start reading after text loads").addToggle((toggle) => toggle.setValue(this.plugin.settings.autoStart).onChange(async (value) => {
       this.plugin.settings.autoStart = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian2.Setting(containerEl).setName("Auto-start delay").setDesc("Delay before auto-start (seconds)").addSlider((slider) => slider.setLimits(1, 10, 1).setValue(this.plugin.settings.autoStartDelay).setDynamicTooltip().onChange(async (value) => {
-      this.plugin.settings.autoStartDelay = value;
-      await this.plugin.saveSettings();
-    }));
+    const autoStartDelaySetting = new import_obsidian3.Setting(containerEl).setName("Auto-start delay").setDesc("Delay before auto-start (seconds)");
+    this.createSliderWithInput(
+      autoStartDelaySetting,
+      1,
+      10,
+      1,
+      this.plugin.settings.autoStartDelay,
+      "s",
+      async (value) => {
+        this.plugin.settings.autoStartDelay = value;
+        await this.plugin.saveSettings();
+      }
+    );
     containerEl.createEl("h3", { text: "Display Options" });
-    new import_obsidian2.Setting(containerEl).setName("Show progress bar").setDesc("Display reading progress bar").addToggle((toggle) => toggle.setValue(this.plugin.settings.showProgress).onChange(async (value) => {
+    new import_obsidian3.Setting(containerEl).setName("Show progress bar").setDesc("Display reading progress bar").addToggle((toggle) => toggle.setValue(this.plugin.settings.showProgress).onChange(async (value) => {
       this.plugin.settings.showProgress = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian2.Setting(containerEl).setName("Show statistics").setDesc("Display reading statistics").addToggle((toggle) => toggle.setValue(this.plugin.settings.showStats).onChange(async (value) => {
+    new import_obsidian3.Setting(containerEl).setName("Show statistics").setDesc("Display reading statistics").addToggle((toggle) => toggle.setValue(this.plugin.settings.showStats).onChange(async (value) => {
       this.plugin.settings.showStats = value;
       await this.plugin.saveSettings();
     }));
@@ -1089,19 +3527,35 @@ var DashReaderSettingTab = class extends import_obsidian2.PluginSettingTab {
 
 // src/types.ts
 var DEFAULT_SETTINGS = {
-  wpm: 300,
+  wpm: 400,
+  // Increased from 300 (inspired by Stutter: 400-800 range)
   chunkSize: 1,
   fontSize: 48,
   highlightColor: "#4a9eff",
   backgroundColor: "#1e1e1e",
   fontColor: "#ffffff",
   fontFamily: "inherit",
-  showContext: true,
+  showContext: false,
   contextWords: 3,
+  showMinimap: true,
+  showBreadcrumb: true,
   enableMicropause: true,
-  micropausePunctuation: 1.5,
-  micropauseLongWords: 1.3,
-  micropauseParagraph: 2,
+  micropausePunctuation: 2.5,
+  // Sentence-ending punctuation (.,!?) - Stutter-inspired
+  micropauseOtherPunctuation: 1.5,
+  // Other punctuation (;:,) - lighter pause
+  micropauseLongWords: 1.4,
+  // Words >8 chars - Stutter-inspired
+  micropauseParagraph: 2.5,
+  // Paragraph breaks - better section separation
+  micropauseNumbers: 1.8,
+  // Numbers and dates - comprehension aid
+  micropauseSectionMarkers: 2,
+  // Section numbers (1., I., etc.)
+  micropauseListBullets: 1.8,
+  // List bullets (-, *, +, •)
+  micropauseCallouts: 2,
+  // Obsidian callouts
   autoStart: false,
   autoStartDelay: 3,
   showProgress: true,
@@ -1112,19 +3566,181 @@ var DEFAULT_SETTINGS = {
   hotkeyIncrementWpm: "ArrowUp",
   hotkeyDecrementWpm: "ArrowDown",
   hotkeyQuit: "Escape",
+  enableSlowStart: true,
+  // Enable slow start by default
   enableAcceleration: false,
   accelerationDuration: 30,
-  accelerationTargetWpm: 450
+  accelerationTargetWpm: 600
+  // Increased from 450 (Stutter suggests 600-800)
 };
 
+// src/services/settings-validator.ts
+var LIMITS2 = {
+  wpm: { min: 50, max: 5e3 },
+  chunkSize: { min: 1, max: 10 },
+  fontSize: { min: 12, max: 120 },
+  contextWords: { min: 0, max: 20 },
+  autoStartDelay: { min: 0, max: 60 },
+  accelerationDuration: { min: 1, max: 300 },
+  accelerationTargetWpm: { min: 50, max: 5e3 },
+  micropauseMultiplier: { min: 1, max: 10 }
+};
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+function validateColor(color, defaultColor) {
+  if (typeof color !== "string")
+    return defaultColor;
+  if (/^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(color)) {
+    return color;
+  }
+  return defaultColor;
+}
+function validateNumber(value, defaultValue, min, max) {
+  if (typeof value !== "number" || isNaN(value)) {
+    return defaultValue;
+  }
+  return clamp(value, min, max);
+}
+function validateBoolean(value, defaultValue) {
+  if (typeof value === "boolean")
+    return value;
+  return defaultValue;
+}
+function validateString(value, defaultValue) {
+  if (typeof value === "string")
+    return value;
+  return defaultValue;
+}
+function validateSettings(partial) {
+  if (!partial || typeof partial !== "object") {
+    return { ...DEFAULT_SETTINGS };
+  }
+  return {
+    // Numeric settings with range validation
+    wpm: validateNumber(
+      partial.wpm,
+      DEFAULT_SETTINGS.wpm,
+      LIMITS2.wpm.min,
+      LIMITS2.wpm.max
+    ),
+    chunkSize: validateNumber(
+      partial.chunkSize,
+      DEFAULT_SETTINGS.chunkSize,
+      LIMITS2.chunkSize.min,
+      LIMITS2.chunkSize.max
+    ),
+    fontSize: validateNumber(
+      partial.fontSize,
+      DEFAULT_SETTINGS.fontSize,
+      LIMITS2.fontSize.min,
+      LIMITS2.fontSize.max
+    ),
+    contextWords: validateNumber(
+      partial.contextWords,
+      DEFAULT_SETTINGS.contextWords,
+      LIMITS2.contextWords.min,
+      LIMITS2.contextWords.max
+    ),
+    autoStartDelay: validateNumber(
+      partial.autoStartDelay,
+      DEFAULT_SETTINGS.autoStartDelay,
+      LIMITS2.autoStartDelay.min,
+      LIMITS2.autoStartDelay.max
+    ),
+    accelerationDuration: validateNumber(
+      partial.accelerationDuration,
+      DEFAULT_SETTINGS.accelerationDuration,
+      LIMITS2.accelerationDuration.min,
+      LIMITS2.accelerationDuration.max
+    ),
+    accelerationTargetWpm: validateNumber(
+      partial.accelerationTargetWpm,
+      DEFAULT_SETTINGS.accelerationTargetWpm,
+      LIMITS2.accelerationTargetWpm.min,
+      LIMITS2.accelerationTargetWpm.max
+    ),
+    // Micropause multipliers
+    micropausePunctuation: validateNumber(
+      partial.micropausePunctuation,
+      DEFAULT_SETTINGS.micropausePunctuation,
+      LIMITS2.micropauseMultiplier.min,
+      LIMITS2.micropauseMultiplier.max
+    ),
+    micropauseOtherPunctuation: validateNumber(
+      partial.micropauseOtherPunctuation,
+      DEFAULT_SETTINGS.micropauseOtherPunctuation,
+      LIMITS2.micropauseMultiplier.min,
+      LIMITS2.micropauseMultiplier.max
+    ),
+    micropauseLongWords: validateNumber(
+      partial.micropauseLongWords,
+      DEFAULT_SETTINGS.micropauseLongWords,
+      LIMITS2.micropauseMultiplier.min,
+      LIMITS2.micropauseMultiplier.max
+    ),
+    micropauseParagraph: validateNumber(
+      partial.micropauseParagraph,
+      DEFAULT_SETTINGS.micropauseParagraph,
+      LIMITS2.micropauseMultiplier.min,
+      LIMITS2.micropauseMultiplier.max
+    ),
+    micropauseNumbers: validateNumber(
+      partial.micropauseNumbers,
+      DEFAULT_SETTINGS.micropauseNumbers,
+      LIMITS2.micropauseMultiplier.min,
+      LIMITS2.micropauseMultiplier.max
+    ),
+    micropauseSectionMarkers: validateNumber(
+      partial.micropauseSectionMarkers,
+      DEFAULT_SETTINGS.micropauseSectionMarkers,
+      LIMITS2.micropauseMultiplier.min,
+      LIMITS2.micropauseMultiplier.max
+    ),
+    micropauseListBullets: validateNumber(
+      partial.micropauseListBullets,
+      DEFAULT_SETTINGS.micropauseListBullets,
+      LIMITS2.micropauseMultiplier.min,
+      LIMITS2.micropauseMultiplier.max
+    ),
+    micropauseCallouts: validateNumber(
+      partial.micropauseCallouts,
+      DEFAULT_SETTINGS.micropauseCallouts,
+      LIMITS2.micropauseMultiplier.min,
+      LIMITS2.micropauseMultiplier.max
+    ),
+    // Color settings
+    highlightColor: validateColor(partial.highlightColor, DEFAULT_SETTINGS.highlightColor),
+    backgroundColor: validateColor(partial.backgroundColor, DEFAULT_SETTINGS.backgroundColor),
+    fontColor: validateColor(partial.fontColor, DEFAULT_SETTINGS.fontColor),
+    // String settings
+    fontFamily: validateString(partial.fontFamily, DEFAULT_SETTINGS.fontFamily),
+    hotkeyPlay: validateString(partial.hotkeyPlay, DEFAULT_SETTINGS.hotkeyPlay),
+    hotkeyRewind: validateString(partial.hotkeyRewind, DEFAULT_SETTINGS.hotkeyRewind),
+    hotkeyForward: validateString(partial.hotkeyForward, DEFAULT_SETTINGS.hotkeyForward),
+    hotkeyIncrementWpm: validateString(partial.hotkeyIncrementWpm, DEFAULT_SETTINGS.hotkeyIncrementWpm),
+    hotkeyDecrementWpm: validateString(partial.hotkeyDecrementWpm, DEFAULT_SETTINGS.hotkeyDecrementWpm),
+    hotkeyQuit: validateString(partial.hotkeyQuit, DEFAULT_SETTINGS.hotkeyQuit),
+    // Boolean settings
+    showContext: validateBoolean(partial.showContext, DEFAULT_SETTINGS.showContext),
+    showMinimap: validateBoolean(partial.showMinimap, DEFAULT_SETTINGS.showMinimap),
+    showBreadcrumb: validateBoolean(partial.showBreadcrumb, DEFAULT_SETTINGS.showBreadcrumb),
+    enableMicropause: validateBoolean(partial.enableMicropause, DEFAULT_SETTINGS.enableMicropause),
+    autoStart: validateBoolean(partial.autoStart, DEFAULT_SETTINGS.autoStart),
+    showProgress: validateBoolean(partial.showProgress, DEFAULT_SETTINGS.showProgress),
+    showStats: validateBoolean(partial.showStats, DEFAULT_SETTINGS.showStats),
+    enableSlowStart: validateBoolean(partial.enableSlowStart, DEFAULT_SETTINGS.enableSlowStart),
+    enableAcceleration: validateBoolean(partial.enableAcceleration, DEFAULT_SETTINGS.enableAcceleration)
+  };
+}
+
 // main.ts
-var DashReaderPlugin = class extends import_obsidian3.Plugin {
+var DashReaderPlugin = class extends import_obsidian4.Plugin {
   constructor() {
     super(...arguments);
     this.view = null;
   }
   async onload() {
-    console.log("Loading DashReader plugin");
     await this.loadSettings();
     this.registerView(
       VIEW_TYPE_DASHREADER,
@@ -1138,7 +3754,7 @@ var DashReaderPlugin = class extends import_obsidian3.Plugin {
     });
     this.addCommand({
       id: "open-dashreader",
-      name: "Open DashReader",
+      name: "Open RSVP reader",
       callback: () => {
         this.activateView();
       }
@@ -1155,7 +3771,7 @@ var DashReaderPlugin = class extends import_obsidian3.Plugin {
             }
           });
         } else {
-          new import_obsidian3.Notice("Please select some text first");
+          new import_obsidian4.Notice("Please select some text first");
         }
       }
     });
@@ -1163,7 +3779,7 @@ var DashReaderPlugin = class extends import_obsidian3.Plugin {
       id: "read-note",
       name: "Read entire note",
       callback: () => {
-        const activeView = this.app.workspace.getActiveViewOfType(import_obsidian3.MarkdownView);
+        const activeView = this.app.workspace.getActiveViewOfType(import_obsidian4.MarkdownView);
         if (activeView) {
           const content = activeView.editor.getValue();
           this.activateView().then(() => {
@@ -1172,7 +3788,7 @@ var DashReaderPlugin = class extends import_obsidian3.Plugin {
             }
           });
         } else {
-          new import_obsidian3.Notice("No active note found");
+          new import_obsidian4.Notice("No active note found");
         }
       }
     });
@@ -1180,7 +3796,7 @@ var DashReaderPlugin = class extends import_obsidian3.Plugin {
       id: "toggle-play-pause",
       name: "Toggle Play/Pause",
       callback: () => {
-        new import_obsidian3.Notice("Use Shift+Space key when DashReader is active");
+        new import_obsidian4.Notice("Use Shift+Space key when DashReader is active");
       }
     });
     this.registerEvent(
@@ -1207,13 +3823,12 @@ var DashReaderPlugin = class extends import_obsidian3.Plugin {
         }
       })
     );
-    console.log("DashReader plugin loaded successfully");
   }
   onunload() {
-    console.log("Unloading DashReader plugin");
   }
   async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    const rawSettings = await this.loadData();
+    this.settings = validateSettings(rawSettings);
   }
   async saveSettings() {
     await this.saveData(this.settings);

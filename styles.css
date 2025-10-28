@@ -43,6 +43,68 @@
   transform: scale(1.1);
 }
 
+/* ===== BREADCRUMB NAVIGATION (Discreet but visible) ===== */
+.dashreader-breadcrumb {
+  display: flex;
+  padding: 8px 20px;
+  background: transparent;
+  font-size: 13px;
+  color: var(--text-muted);
+  overflow-x: auto;
+  white-space: nowrap;
+  scrollbar-width: thin;
+  opacity: 0.5;
+  transition: opacity 0.3s ease;
+  align-items: center;
+  gap: 8px;
+}
+
+.dashreader-breadcrumb:hover {
+  opacity: 1;
+}
+
+.dashreader-breadcrumb-icon {
+  display: inline-block;
+  font-size: 14px;
+  opacity: 0.6;
+  margin-right: 4px;
+}
+
+.dashreader-breadcrumb-item {
+  display: inline-block;
+  cursor: pointer;
+  transition: color 0.2s ease;
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+
+.dashreader-breadcrumb-item:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+.dashreader-breadcrumb-separator {
+  display: inline-block;
+  user-select: none;
+  margin: 0 6px;
+  opacity: 0.7;
+}
+
+.dashreader-breadcrumb-dropdown {
+  display: inline-block;
+  cursor: pointer;
+  margin-left: 8px;
+  padding: 2px 6px;
+  opacity: 0.6;
+  transition: all 0.2s ease;
+  border-radius: 3px;
+}
+
+.dashreader-breadcrumb-dropdown:hover {
+  opacity: 1;
+  background: var(--background-modifier-hover);
+}
+
 /* ===== STATS (Cachées par défaut) ===== */
 .dashreader-stats {
   padding: 16px 20px;
@@ -95,6 +157,7 @@
 /* Contexte */
 .dashreader-context-before,
 .dashreader-context-after {
+  display: block;
   font-size: 16px;
   color: var(--text-muted);
   opacity: 0.5;
@@ -163,6 +226,155 @@
   background: var(--interactive-accent);
   transition: width 0.1s linear;
   box-shadow: 0 0 8px currentColor;
+}
+
+/* ===== MINIMAP VERTICALE (Compact and usable) ===== */
+.dashreader-minimap {
+  display: block;
+  position: fixed;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 40px;
+  height: 70%;
+  max-height: 600px;
+  opacity: 0.4;
+  transition: opacity 0.3s ease;
+  z-index: 90;
+  pointer-events: auto;
+  background: var(--background-secondary);
+  border-radius: 20px;
+  border: 1px solid var(--background-modifier-border);
+  overflow: visible;
+}
+
+.dashreader-minimap:hover {
+  opacity: 0.8;
+}
+
+/* Background track */
+.dashreader-minimap-line {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--background-modifier-border);
+  opacity: 0.6;
+  transform: translateX(-50%);
+}
+
+/* Progress indicator (fills from top to current position) */
+.dashreader-minimap-progress {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 0%;
+  background: linear-gradient(180deg,
+    var(--interactive-accent) 0%,
+    var(--interactive-accent-hover) 100%);
+  opacity: 0.2;
+  transition: height 0.3s ease;
+  pointer-events: none;
+}
+
+/* Heading points on the minimap - LARGER & EASIER TO CLICK */
+.dashreader-minimap-point {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%) translateY(-50%);
+  border-radius: 50%;
+  background: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  pointer-events: auto;
+  opacity: 0.8;
+}
+
+/* Create invisible extended click zone around each point */
+.dashreader-minimap-point::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 40px;
+  height: 30px;
+  cursor: pointer;
+  /* Debug: uncomment to see hit zone */
+  /* background: rgba(255, 0, 0, 0.1); */
+}
+
+/* Size based on heading level - LARGER */
+.dashreader-minimap-point[data-level="1"] {
+  width: 12px;
+  height: 12px;
+}
+
+.dashreader-minimap-point[data-level="2"] {
+  width: 10px;
+  height: 10px;
+}
+
+.dashreader-minimap-point[data-level="3"],
+.dashreader-minimap-point[data-level="4"],
+.dashreader-minimap-point[data-level="5"],
+.dashreader-minimap-point[data-level="6"] {
+  width: 8px;
+  height: 8px;
+}
+
+/* Hover effect on points - MORE VISIBLE */
+.dashreader-minimap-point:hover {
+  transform: translateX(-50%) translateY(-50%) scale(1.8);
+  opacity: 1;
+  background: var(--interactive-accent);
+  box-shadow: 0 0 12px var(--interactive-accent);
+  z-index: 10;
+}
+
+/* Current position indicator */
+.dashreader-minimap-point-current {
+  opacity: 1;
+  background: var(--interactive-accent);
+  box-shadow: 0 0 8px var(--interactive-accent);
+  animation: minimap-pulse 2s ease-in-out infinite;
+}
+
+@keyframes minimap-pulse {
+  0%, 100% {
+    box-shadow: 0 0 8px var(--interactive-accent);
+  }
+  50% {
+    box-shadow: 0 0 12px var(--interactive-accent);
+  }
+}
+
+/* Minimap tooltip (slides from right) */
+.dashreader-minimap-tooltip {
+  position: fixed;
+  right: -300px;
+  padding: 8px 12px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--text-normal);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 95;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  transition: right 0.2s ease-out, opacity 0.2s ease-out;
+  opacity: 0;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dashreader-minimap-tooltip.visible {
+  right: 60px;
+  opacity: 1;
 }
 
 /* ===== CONTRÔLES (Cachés par défaut) ===== */
@@ -410,4 +622,183 @@
 
 .dashreader-container::-webkit-scrollbar-thumb:hover {
   background: var(--interactive-accent);
+}
+
+/* ===== MESSAGES (WELCOME & READY) ===== */
+.dashreader-welcome-message {
+  font-size: 20px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.dashreader-welcome-icon {
+  margin-bottom: 12px;
+}
+
+.dashreader-welcome-instruction {
+  font-size: 14px;
+  opacity: 0.7;
+}
+
+.dashreader-ready-message {
+  font-size: 18px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.dashreader-ready-source {
+  font-size: 14px;
+  opacity: 0.6;
+  margin-bottom: 8px;
+}
+
+.dashreader-ready-duration {
+  font-size: 14px;
+  opacity: 0.7;
+}
+
+.dashreader-ready-start-info {
+  opacity: 0.6;
+}
+
+/* ===== MENUS DROPDOWN ===== */
+.dashreader-menu {
+  position: fixed;
+  z-index: 10000;
+  background-color: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  padding: 8px;
+  max-height: 400px;
+  overflow-y: auto;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  min-width: 300px;
+  max-width: 500px;
+}
+
+.dashreader-outline-menu {
+  position: fixed;
+  z-index: 10000;
+  background-color: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  padding: 8px;
+  max-height: 400px;
+  overflow-y: auto;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  min-width: 300px;
+  max-width: 500px;
+}
+
+/* Menu title */
+.dashreader-menu-title {
+  font-weight: bold;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  font-size: 13px;
+  opacity: 0.8;
+}
+
+/* Menu items */
+.dashreader-menu-item {
+  padding: 4px 8px;
+  cursor: pointer;
+  border-radius: 3px;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: background-color 0.1s ease;
+}
+
+.dashreader-menu-item:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+.dashreader-menu-item-current {
+  background-color: var(--background-modifier-hover);
+  font-weight: bold;
+  border-left: 3px solid var(--interactive-accent);
+  padding-left: 5px;
+}
+
+/* Outline specific styles */
+.dashreader-outline-item {
+  padding: 4px 8px;
+  cursor: pointer;
+  border-radius: 3px;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: background-color 0.1s ease;
+}
+
+.dashreader-outline-item:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+.dashreader-outline-level {
+  font-size: 10px;
+  opacity: 0.5;
+  font-weight: bold;
+  min-width: 24px;
+}
+
+.dashreader-outline-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Note: Old breadcrumb styles removed with redesign */
+
+/* Breadcrumb dropdown indicator (legacy) */
+.dashreader-breadcrumb-dropdown {
+  cursor: pointer;
+  opacity: 0.4;
+  margin-left: 4px;
+  transition: opacity 0.2s ease;
+}
+
+.dashreader-breadcrumb-dropdown:hover {
+  opacity: 1;
+}
+
+/* ===== HEADING DISPLAY ===== */
+.dashreader-heading-separator {
+  width: 60%;
+  height: 2px;
+  background: var(--text-muted);
+  opacity: 0.4;
+  margin: 0 auto 20px auto;
+}
+
+.dashreader-word-with-heading {
+  transition: font-size 0.3s ease;
+}
+
+/* Callout icon styling */
+.dashreader-callout-icon {
+  margin-right: 8px;
+  opacity: 0.8;
+}
+
+/* ===== SETTINGS TAB COMPONENTS ===== */
+/* Slider input field */
+.dashreader-slider-input {
+  width: 50px;
+  text-align: center;
+  margin-left: 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 3px;
+  padding: 2px 4px;
+}
+
+/* Unit label next to slider input */
+.dashreader-slider-unit {
+  margin-left: 4px;
+  opacity: 0.7;
 }

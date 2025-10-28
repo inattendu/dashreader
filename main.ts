@@ -1,15 +1,14 @@
 import { Plugin, WorkspaceLeaf, Notice, MarkdownView, Menu, Editor } from 'obsidian';
 import { DashReaderView, VIEW_TYPE_DASHREADER } from './src/rsvp-view';
 import { DashReaderSettingTab } from './src/settings';
-import { DashReaderSettings, DEFAULT_SETTINGS } from './src/types';
+import { DashReaderSettings } from './src/types';
+import { validateSettings } from './src/services/settings-validator';
 
 export default class DashReaderPlugin extends Plugin {
   settings: DashReaderSettings;
   private view: DashReaderView | null = null;
 
   async onload() {
-    console.log('Loading DashReader plugin');
-
     await this.loadSettings();
 
     // Enregistrer la vue
@@ -29,7 +28,7 @@ export default class DashReaderPlugin extends Plugin {
     // Command: Open DashReader
     this.addCommand({
       id: 'open-dashreader',
-      name: 'Open DashReader',
+      name: 'Open RSVP reader',
       callback: () => {
         this.activateView();
       }
@@ -114,17 +113,15 @@ export default class DashReaderPlugin extends Plugin {
         }
       })
     );
-
-    console.log('DashReader plugin loaded successfully');
   }
 
   onunload() {
-    console.log('Unloading DashReader plugin');
     // Don't detach leaves here - let Obsidian restore them at original positions during updates
   }
 
   async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    const rawSettings = await this.loadData();
+    this.settings = validateSettings(rawSettings);
   }
 
   async saveSettings() {

@@ -9,9 +9,14 @@ export class MarkdownParser {
     // 1. Enlever le frontmatter YAML EN PREMIER (souvent au début)
     text = text.replace(/^---[\s\S]*?---\n?/m, '');
 
-    // 2. Extraire le contenu des blocs de code (garder le code, enlever les ```)
-    // Gère: ```python\ncode``` ou ```\ncode``` ou ``` code ```
-    text = text.replace(/```[\w-]*\n?([\s\S]*?)```/g, '$1');
+    // 2. Protéger le contenu des blocs de code avec des marqueurs temporaires
+    // Cela empêche les commentaires # dans le code d'être traités comme des headings
+    const codeBlocks: string[] = [];
+    text = text.replace(/```[\w-]*\n?([\s\S]*?)```/g, (_match, code) => {
+      const index = codeBlocks.length;
+      codeBlocks.push(code);
+      return `___CODE_BLOCK_${index}___`;
+    });
 
     // 3. Enlever les inline code mais garder le contenu
     text = text.replace(/`([^`]+)`/g, '$1');
@@ -23,7 +28,7 @@ export class MarkdownParser {
     text = text.replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1');
 
     // 6. Enlever les wikilinks [[lien]] ou [[lien|alias]] -> garder alias ou lien
-    text = text.replace(/\[\[([^\]|]+)(\|([^\]]+))?\]\]/g, (match, link, pipe, alias) => {
+    text = text.replace(/\[\[([^\]|]+)(\|([^\]]+))?\]\]/g, (_match, link, _pipe, alias) => {
       return alias || link;
     });
 
@@ -42,13 +47,19 @@ export class MarkdownParser {
 
     // 10. Marquer les headings avec leur niveau (#, ##, etc.)
     // # Titre → [H1]Titre, ## Titre → [H2]Titre, etc. (sans espace après le marqueur)
-    text = text.replace(/^(#{1,6})\s+(.+)$/gm, (match, hashes, content) => {
+    text = text.replace(/^(#{1,6})\s+(.+)$/gm, (_match, hashes, content) => {
       const level = hashes.length;
       return `[H${level}]${content}`;
     });
 
-    // 11. Enlever les callouts Obsidian [!type] mais garder le contenu
-    text = text.replace(/^>\s*\[![\w-]+\].*$/gm, '');
+    // 11. Marquer les callouts Obsidian comme pseudo-headings
+    // > [!type] Titre → [CALLOUT:type]Titre
+    // Garde le contenu des lignes suivantes (gérées par l'étape suivante)
+    text = text.replace(/^>\s*\[!([\w-]+)\]\s*(.*)$/gm, (_match, type, title) => {
+      // Si pas de titre, utiliser le type comme titre
+      const displayTitle = title.trim() || type;
+      return `[CALLOUT:${type}]${displayTitle}`;
+    });
 
     // 12. Enlever les blockquotes > (garder le contenu)
     text = text.replace(/^>\s*/gm, '');
@@ -86,7 +97,12 @@ export class MarkdownParser {
     text = text.replace(/^[ \t]+/gm, '');
     text = text.replace(/[ \t]+$/gm, '');
 
-    // 23. Trim final
+    // 23. Restaurer le contenu des blocs de code
+    text = text.replace(/___CODE_BLOCK_(\d+)___/g, (_match, index) => {
+      return codeBlocks[parseInt(index)] || '';
+    });
+
+    // 24. Trim final
     text = text.trim();
 
     return text;

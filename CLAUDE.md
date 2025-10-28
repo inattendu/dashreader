@@ -23,12 +23,35 @@ npm run version
 
 DashReader is an Obsidian plugin implementing RSVP (Rapid Serial Visual Presentation) speed reading. The architecture follows a clear separation:
 
+**Core Architecture** (6 main files):
+
 - **main.ts** - Plugin entry point, registers commands, ribbon icons, and manages view lifecycle
 - **src/rsvp-view.ts** - UI layer (ItemView), handles user interactions, cursor tracking, and display
 - **src/rsvp-engine.ts** - Core reading engine, controls timing, word iteration, and micropause logic
 - **src/markdown-parser.ts** - Transforms Markdown to plain text while marking headings with `[H1]`, `[H2]` etc.
 - **src/settings.ts** - Settings UI using Obsidian's PluginSettingTab
 - **src/types.ts** - Shared interfaces and default settings
+
+**Support Modules** (extracted during refactoring Phase 2):
+
+- **src/constants.ts** - Centralized CSS classes, timing values, limits, and magic numbers
+- **src/logger.ts** - Centralized logging with DashReader: prefix
+- **src/hotkey-handler.ts** - Keyboard event handling (Shift+Space, navigation hotkeys)
+- **src/word-display.ts** - Word rendering logic with heading/callout support
+- **src/dom-registry.ts** - DOM element management and lifecycle
+- **src/view-state.ts** - Reactive state management with change tracking
+- **src/breadcrumb-manager.ts** - Breadcrumb navigation UI and logic
+- **src/minimap-manager.ts** - Vertical minimap visualization
+- **src/menu-builder.ts** - Dropdown menu creation for navigation
+- **src/auto-load-manager.ts** - Auto-load text from editor on file-open/selection
+- **src/ui-builders.ts** - UI component builders (buttons, sliders, toggles)
+
+**Services** (business logic extraction):
+
+- **src/services/timeout-manager.ts** - Timer management with cleanup
+- **src/services/settings-validator.ts** - Settings validation and sanitization
+- **src/services/micropause-service.ts** - Micropause calculation using Strategy Pattern
+- **src/services/stats-formatter.ts** - Statistics formatting (time, WPM, progress)
 
 ### Key Architecture Patterns
 
@@ -43,9 +66,51 @@ DashReader is an Obsidian plugin implementing RSVP (Rapid Serial Visual Presenta
 4. Pass word INDEX to engine, not character position
 
 **Heading System**: Headings are marked during parsing (`# Title` → `[H1]Title`), then:
-- View detects markers and displays with proportional font size (H1=2x, H2=1.75x, etc.)
+- View detects markers and displays with proportional font size (H1=1.5x, H2=1.3x, H3=1.2x, etc.)
 - View adds visual separator lines before headings
-- Engine applies longer micropauses (H1=3x, H2=2.5x, etc.)
+- Engine applies longer micropauses (H1=2.0x, H2=1.8x, H3=1.5x, etc.)
+- Headings extracted with full titles using line break markers (§§LINEBREAK§§)
+
+**Breadcrumb Navigation System** (v1.4.0): Provides document structure awareness and navigation:
+
+- **Display**: Single-line breadcrumb showing hierarchical path: 📑 H1 › H2 › H3 ▼
+- **Extraction**: Engine's `extractHeadings()` collects all headings and callouts during `setText()`
+  - Stops at §§LINEBREAK§§ markers to capture complete titles
+  - Returns `HeadingInfo[]` with level, text, wordIndex, and optional calloutType
+- **Context Building**: `getCurrentHeadingContext()` builds hierarchical breadcrumb
+  - Filters headings up to current word index
+  - Maintains heading stack, pops when level decreases
+  - Returns `HeadingContext` with breadcrumb array and current heading
+- **Navigation**: Click heading to jump, click ▼ dropdown for same-level navigation
+  - `navigateToHeading(wordIndex)` preserves playback state
+  - Dropdown menu shows all headings of same level with numbering
+  - Menu created in `document.body` with fixed positioning for proper display
+  - Centered under breadcrumb with viewport overflow protection
+- **Initial Display**: Breadcrumb shown immediately on `loadText()`, not just during playback
+- **Update Optimization**: Breadcrumb only redraws when heading context changes
+  - `lastHeadingContext` property caches previous context
+  - `hasHeadingContextChanged()` compares new vs old context
+  - Prevents DOM recreation on every word, keeps dropdown clickable during reading
+
+**Callout Support** (v1.4.0): Full integration with Obsidian callouts:
+- Parser marks callouts: `> [!type] Title` → `[CALLOUT:type]Title`
+- Treated as pseudo-headings (level=0) in breadcrumb hierarchy
+- Display with icon prefix (📝 note, 💡 tip, ⚠️ warning, etc.)
+- Visual separator and 1.2x font size during reading
+- 2.0x micropause multiplier (configurable)
+
+**Line Break Preservation** (v1.4.0): Critical for heading extraction:
+
+- `\n` replaced with `§§LINEBREAK§§` marker in `rsvp-engine.ts` `setText()` method (not in parser)
+- Allows `extractHeadings()` to detect end of single-line headings
+- Markers converted back to `\n` after extraction for display
+- Prevents headings from capturing following paragraphs
+
+**Slow Start Feature** (v1.4.0): Progressive speed ramp for comfortable reading initiation:
+- Enabled by default via `enableSlowStart` setting
+- Multiplies delay over first 5 words: 2.0x → 1.8x → 1.6x → 1.4x → 1.2x → 1.0x
+- Resets on each new reading session (play after stop/reset)
+- Inspired by Stutter plugin's ease-in approach
 
 **Accurate Time Estimation**: `getEstimatedDuration()` and `getRemainingTime()` iterate through ALL remaining words and sum their individual delays, accounting for:
 - Heading micropauses
@@ -91,22 +156,61 @@ Settings are defined in `src/types.ts` as:
 
 UI is built in `src/settings.ts` using Obsidian's Setting API. Inline settings in the view mirror the main settings tab.
 
+**Enhanced Settings UI** (v1.4.0):
+- **Editable Numeric Inputs**: All sliders now have editable text inputs displaying current values
+  - Bidirectional sync: slider ↔ input
+  - Validation and clamping to min/max bounds
+  - Unit labels (px, s, x) displayed but non-editable
+  - Implementation via `createSliderWithInput()` helper method
+- **Extended WPM Range**: Max WPM increased from 1000 to 5000 for ultra-fast reading
+- **Complete Micropause Controls**: All 8 micropause multipliers exposed in settings tab
+  - Sentence-ending punctuation (.,!?)
+  - Other punctuation (;:,)
+  - Numbers and dates
+  - Long words (>8 chars)
+  - Paragraph breaks
+  - Section markers (1., I., etc.)
+  - List bullets (-, *, +, •)
+  - Obsidian callouts
+
 ### Micropause System
 
-Micropauses multiply the base delay (`60/WPM * 1000 ms`). Multiple conditions can stack multiplicatively:
+Micropauses multiply the base delay (`60/WPM * 1000 ms`). Multiple conditions can stack multiplicatively. **All multipliers are configurable in settings** (v1.4.0):
 
 ```typescript
-// Example: H1 heading with period and long word
-multiplier = 3.0 (H1) * 1.5 (period) * 1.3 (>8 chars) = 5.85x delay
+// Example: H1 heading with sentence-ending punctuation and long word
+multiplier = 2.0 (H1) * 2.5 (.) * 1.4 (>8 chars) = 7.0x delay
 ```
 
+**Configurable Multipliers** (v1.4.0):
+- `micropausePunctuation` (2.5x): Sentence-ending punctuation (.,!?)
+- `micropauseOtherPunctuation` (1.5x): Other punctuation (;:,)
+- `micropauseNumbers` (1.8x): Words containing digits (dates, statistics, years)
+- `micropauseLongWords` (1.4x): Words >8 characters
+- `micropauseParagraph` (2.5x): Paragraph breaks (\n)
+- `micropauseSectionMarkers` (2.0x): Section numbers (1., I., II., a., etc.)
+- `micropauseListBullets` (1.8x): List bullets (-, *, +, •)
+- `micropauseCallouts` (2.0x): Obsidian callouts ([CALLOUT:type])
+
+**Heading Multipliers** (hardcoded in engine):
+- H1: 2.0x, H2: 1.8x, H3: 1.5x, H4: 1.3x, H5: 1.2x, H6: 1.1x
+
 Order of detection in `calculateDelay()`:
-1. Headings (`[H1]` through `[H6]`)
-2. Section markers (1., I., etc.)
-3. List bullets (-, *, +, •)
-4. Punctuation (end of word)
-5. Long words (>8 characters)
-6. Paragraph breaks (`\n`)
+1. Headings (`[H1]` through `[H6]`) - engine hardcoded
+2. Callouts (`[CALLOUT:type]`) - `micropauseCallouts`
+3. Section markers (1., I., etc.) - `micropauseSectionMarkers`
+4. List bullets (-, *, +, •) - `micropauseListBullets`
+5. Sentence punctuation (.,!?) - `micropausePunctuation`
+6. Other punctuation (;:,) - `micropauseOtherPunctuation`
+7. Numbers (containing digits) - `micropauseNumbers`
+8. Long words (>8 characters) - `micropauseLongWords`
+9. Paragraph breaks (`\n`) - `micropauseParagraph`
+
+**Stutter-Inspired Defaults** (v1.4.0):
+- Base WPM: 400 (up from 300)
+- Sentence punctuation: 2.5x (up from 1.5x)
+- Numbers: 1.8x (new feature)
+- Punctuation distinction: sentences vs. commas/semicolons
 
 ## Release Process
 
