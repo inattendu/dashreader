@@ -971,35 +971,13 @@ export class DashReaderView extends ItemView {
    * @param wordIndex - Starting word index (0 if starting from beginning)
    */
   private buildInitialBreadcrumb(wordIndex: number): void {
-    const allHeadings = this.engine.getHeadings();
-    if (allHeadings.length === 0) return;
+    // Get heading context from engine (reuses breadcrumb building logic)
+    const context = this.engine.getCurrentHeadingContext(wordIndex);
 
-    // Get headings up to starting position
-    const relevantHeadings = allHeadings.filter(h => h.wordIndex <= wordIndex);
-    if (relevantHeadings.length === 0) return;
-
-    // Build hierarchical breadcrumb path
-    const breadcrumb: HeadingInfo[] = [];
-    let currentLevel = 0;
-
-    for (const heading of relevantHeadings) {
-      if (heading.level <= currentLevel) {
-        // Pop headings of equal or higher level
-        while (breadcrumb.length > 0 && breadcrumb[breadcrumb.length - 1].level >= heading.level) {
-          breadcrumb.pop();
-        }
-      }
-      breadcrumb.push(heading);
-      currentLevel = heading.level;
+    // Update breadcrumb manager if we have headings
+    if (context.breadcrumb.length > 0) {
+      this.breadcrumbManager.updateBreadcrumb(context);
     }
-
-    // Create context and update breadcrumb manager
-    const initialContext: HeadingContext = {
-      breadcrumb,
-      current: breadcrumb[breadcrumb.length - 1] || null
-    };
-
-    this.breadcrumbManager.updateBreadcrumb(initialContext);
   }
 
   /**

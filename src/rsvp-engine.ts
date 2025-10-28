@@ -327,8 +327,11 @@ export class RSVPEngine {
   /**
    * Get the current heading context (breadcrumb) for a given word index
    * Returns the hierarchical path of headings leading to the current position
+   *
+   * @param wordIndex - Word index to get context for
+   * @returns Heading context with breadcrumb path and current heading
    */
-  private getCurrentHeadingContext(wordIndex: number): HeadingContext {
+  getCurrentHeadingContext(wordIndex: number): HeadingContext {
     if (this.headings.length === 0) {
       return { breadcrumb: [], current: null };
     }

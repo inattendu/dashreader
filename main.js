@@ -407,6 +407,9 @@ var RSVPEngine = class {
   /**
    * Get the current heading context (breadcrumb) for a given word index
    * Returns the hierarchical path of headings leading to the current position
+   *
+   * @param wordIndex - Word index to get context for
+   * @returns Heading context with breadcrumb path and current heading
    */
   getCurrentHeadingContext(wordIndex) {
     if (this.headings.length === 0) {
@@ -3020,28 +3023,10 @@ var DashReaderView = class extends import_obsidian2.ItemView {
    * @param wordIndex - Starting word index (0 if starting from beginning)
    */
   buildInitialBreadcrumb(wordIndex) {
-    const allHeadings = this.engine.getHeadings();
-    if (allHeadings.length === 0)
-      return;
-    const relevantHeadings = allHeadings.filter((h) => h.wordIndex <= wordIndex);
-    if (relevantHeadings.length === 0)
-      return;
-    const breadcrumb = [];
-    let currentLevel = 0;
-    for (const heading of relevantHeadings) {
-      if (heading.level <= currentLevel) {
-        while (breadcrumb.length > 0 && breadcrumb[breadcrumb.length - 1].level >= heading.level) {
-          breadcrumb.pop();
-        }
-      }
-      breadcrumb.push(heading);
-      currentLevel = heading.level;
+    const context = this.engine.getCurrentHeadingContext(wordIndex);
+    if (context.breadcrumb.length > 0) {
+      this.breadcrumbManager.updateBreadcrumb(context);
     }
-    const initialContext = {
-      breadcrumb,
-      current: breadcrumb[breadcrumb.length - 1] || null
-    };
-    this.breadcrumbManager.updateBreadcrumb(initialContext);
   }
   /**
    * Handles auto-start functionality if enabled in settings
