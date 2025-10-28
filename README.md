@@ -106,13 +106,7 @@ All settings available in `Settings → DashReader` with editable numeric inputs
 
 ## Contributing
 
-Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for:
-
-- Development setup and guidelines
-- Obsidian plugin guidelines compliance
-- Project structure and architecture
-- Git workflow and commit conventions
-- Pull request guidelines
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for development guidelines.
 
 ## License
 
