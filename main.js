@@ -531,15 +531,15 @@ var MarkdownParser = class {
       return `___CODE_BLOCK_${index}___`;
     });
     text = text.replace(/`([^`]+)`/g, "$1");
-    text = text.replace(/!\[([^\]]*)\]\([^\)]+\)/g, "");
-    text = text.replace(/\[([^\]]+)\]\([^\)]+\)/g, "$1");
+    text = text.replace(/!\[([^\]]*)\]\([^)]+\)/g, "");
+    text = text.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
     text = text.replace(/\[\[([^\]|]+)(\|([^\]]+))?\]\]/g, (_match, link, _pipe, alias) => {
       return alias || link;
     });
-    text = text.replace(/\*\*\*([^\*]+)\*\*\*/g, "$1");
-    text = text.replace(/\*\*([^\*]+)\*\*/g, "$1");
+    text = text.replace(/\*\*\*([^*]+)\*\*\*/g, "$1");
+    text = text.replace(/\*\*([^*]+)\*\*/g, "$1");
     text = text.replace(/__([^_]+)__/g, "$1");
-    text = text.replace(/\*([^\*\n]+)\*/g, "$1");
+    text = text.replace(/\*([^*\n]+)\*/g, "$1");
     text = text.replace(/_([^_\n]+)_/g, "$1");
     text = text.replace(/~~([^~]+)~~/g, "$1");
     text = text.replace(/==([^=]+)==/g, "$1");
@@ -3261,8 +3261,8 @@ var DashReaderSettingTab = class extends import_obsidian3.PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    containerEl.createEl("h2", { text: "DashReader Settings" });
-    containerEl.createEl("h3", { text: "Reading Settings" });
+    new import_obsidian3.Setting(containerEl).setName("DashReader Settings").setHeading();
+    new import_obsidian3.Setting(containerEl).setName("Reading Settings").setHeading();
     const wpmSetting = new import_obsidian3.Setting(containerEl).setName("Words per minute (WPM)").setDesc("Reading speed (50-5000)");
     this.createSliderWithInput(
       wpmSetting,
@@ -3306,7 +3306,7 @@ var DashReaderSettingTab = class extends import_obsidian3.PluginSettingTab {
       this.plugin.settings.fontFamily = value;
       await this.plugin.saveSettings();
     }));
-    containerEl.createEl("h3", { text: "Reading Enhancements" });
+    new import_obsidian3.Setting(containerEl).setName("Reading Enhancements").setHeading();
     new import_obsidian3.Setting(containerEl).setName("Slow Start").setDesc("Gradually increase speed over first 5 words for comfortable start").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableSlowStart).onChange(async (value) => {
       this.plugin.settings.enableSlowStart = value;
       await this.plugin.saveSettings();
@@ -3341,7 +3341,7 @@ var DashReaderSettingTab = class extends import_obsidian3.PluginSettingTab {
         await this.plugin.saveSettings();
       }
     );
-    containerEl.createEl("h3", { text: "Appearance" });
+    new import_obsidian3.Setting(containerEl).setName("Appearance").setHeading();
     new import_obsidian3.Setting(containerEl).setName("Highlight color").setDesc("Color for the center character highlight").addText((text) => text.setPlaceholder("#4a9eff").setValue(this.plugin.settings.highlightColor).onChange(async (value) => {
       this.plugin.settings.highlightColor = value;
       await this.plugin.saveSettings();
@@ -3354,7 +3354,7 @@ var DashReaderSettingTab = class extends import_obsidian3.PluginSettingTab {
       this.plugin.settings.backgroundColor = value;
       await this.plugin.saveSettings();
     }));
-    containerEl.createEl("h3", { text: "Context Display" });
+    new import_obsidian3.Setting(containerEl).setName("Context Display").setHeading();
     new import_obsidian3.Setting(containerEl).setName("Show context").setDesc("Display words before and after current word").addToggle((toggle) => toggle.setValue(this.plugin.settings.showContext).onChange(async (value) => {
       this.plugin.settings.showContext = value;
       await this.plugin.saveSettings();
@@ -3372,7 +3372,7 @@ var DashReaderSettingTab = class extends import_obsidian3.PluginSettingTab {
         await this.plugin.saveSettings();
       }
     );
-    containerEl.createEl("h3", { text: "Navigation" });
+    new import_obsidian3.Setting(containerEl).setName("Navigation").setHeading();
     new import_obsidian3.Setting(containerEl).setName("Show minimap").setDesc("Display vertical minimap with document structure and progress").addToggle((toggle) => toggle.setValue(this.plugin.settings.showMinimap).onChange(async (value) => {
       this.plugin.settings.showMinimap = value;
       await this.plugin.saveSettings();
@@ -3381,7 +3381,7 @@ var DashReaderSettingTab = class extends import_obsidian3.PluginSettingTab {
       this.plugin.settings.showBreadcrumb = value;
       await this.plugin.saveSettings();
     }));
-    containerEl.createEl("h3", { text: "Micropause" });
+    new import_obsidian3.Setting(containerEl).setName("Micropause").setHeading();
     new import_obsidian3.Setting(containerEl).setName("Enable micropause").setDesc("Automatic pauses based on punctuation and word length").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableMicropause).onChange(async (value) => {
       this.plugin.settings.enableMicropause = value;
       await this.plugin.saveSettings();
@@ -3490,7 +3490,7 @@ var DashReaderSettingTab = class extends import_obsidian3.PluginSettingTab {
         await this.plugin.saveSettings();
       }
     );
-    containerEl.createEl("h3", { text: "Auto-start" });
+    new import_obsidian3.Setting(containerEl).setName("Auto-start").setHeading();
     new import_obsidian3.Setting(containerEl).setName("Auto-start reading").setDesc("Automatically start reading after text loads").addToggle((toggle) => toggle.setValue(this.plugin.settings.autoStart).onChange(async (value) => {
       this.plugin.settings.autoStart = value;
       await this.plugin.saveSettings();
@@ -3508,7 +3508,7 @@ var DashReaderSettingTab = class extends import_obsidian3.PluginSettingTab {
         await this.plugin.saveSettings();
       }
     );
-    containerEl.createEl("h3", { text: "Display Options" });
+    new import_obsidian3.Setting(containerEl).setName("Display Options").setHeading();
     new import_obsidian3.Setting(containerEl).setName("Show progress bar").setDesc("Display reading progress bar").addToggle((toggle) => toggle.setValue(this.plugin.settings.showProgress).onChange(async (value) => {
       this.plugin.settings.showProgress = value;
       await this.plugin.saveSettings();
@@ -3517,7 +3517,7 @@ var DashReaderSettingTab = class extends import_obsidian3.PluginSettingTab {
       this.plugin.settings.showStats = value;
       await this.plugin.saveSettings();
     }));
-    containerEl.createEl("h3", { text: "Keyboard Shortcuts" });
+    new import_obsidian3.Setting(containerEl).setName("Keyboard Shortcuts").setHeading();
     containerEl.createEl("p", {
       text: "Note: Hotkey customization is available in Obsidian's Hotkeys settings.",
       cls: "setting-item-description"
@@ -3736,27 +3736,20 @@ function validateSettings(partial) {
 
 // main.ts
 var DashReaderPlugin = class extends import_obsidian4.Plugin {
-  constructor() {
-    super(...arguments);
-    this.view = null;
-  }
   async onload() {
     await this.loadSettings();
     this.registerView(
       VIEW_TYPE_DASHREADER,
-      (leaf) => {
-        this.view = new DashReaderView(leaf, this.settings);
-        return this.view;
-      }
+      (leaf) => new DashReaderView(leaf, this.settings)
     );
     this.addRibbonIcon("zap", "Open DashReader", () => {
-      this.activateView();
+      void this.activateView();
     });
     this.addCommand({
-      id: "open-dashreader",
+      id: "dashreader",
       name: "Open RSVP reader",
       callback: () => {
-        this.activateView();
+        void this.activateView();
       }
     });
     this.addCommand({
@@ -3765,9 +3758,10 @@ var DashReaderPlugin = class extends import_obsidian4.Plugin {
       editorCallback: (editor) => {
         const selection = editor.getSelection();
         if (selection) {
-          this.activateView().then(() => {
-            if (this.view) {
-              this.view.loadText(selection);
+          void this.activateView().then(() => {
+            const view = this.getView();
+            if (view) {
+              view.loadText(selection);
             }
           });
         } else {
@@ -3782,9 +3776,10 @@ var DashReaderPlugin = class extends import_obsidian4.Plugin {
         const activeView = this.app.workspace.getActiveViewOfType(import_obsidian4.MarkdownView);
         if (activeView) {
           const content = activeView.editor.getValue();
-          this.activateView().then(() => {
-            if (this.view) {
-              this.view.loadText(content);
+          void this.activateView().then(() => {
+            const view = this.getView();
+            if (view) {
+              view.loadText(content);
             }
           });
         } else {
@@ -3805,9 +3800,10 @@ var DashReaderPlugin = class extends import_obsidian4.Plugin {
         if (selection) {
           menu.addItem((item) => {
             item.setTitle("Read with DashReader").setIcon("zap").onClick(() => {
-              this.activateView().then(() => {
-                if (this.view) {
-                  this.view.loadText(selection);
+              void this.activateView().then(() => {
+                const view = this.getView();
+                if (view) {
+                  view.loadText(selection);
                 }
               });
             });
@@ -3818,13 +3814,21 @@ var DashReaderPlugin = class extends import_obsidian4.Plugin {
     this.addSettingTab(new DashReaderSettingTab(this.app, this));
     this.registerEvent(
       this.app.workspace.on("layout-change", () => {
-        if (this.view) {
-          this.view.updateSettings(this.settings);
+        const view = this.getView();
+        if (view) {
+          view.updateSettings(this.settings);
         }
       })
     );
   }
   onunload() {
+  }
+  getView() {
+    const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_DASHREADER);
+    if (leaves.length > 0) {
+      return leaves[0].view;
+    }
+    return null;
   }
   async loadSettings() {
     const rawSettings = await this.loadData();
@@ -3832,8 +3836,9 @@ var DashReaderPlugin = class extends import_obsidian4.Plugin {
   }
   async saveSettings() {
     await this.saveData(this.settings);
-    if (this.view) {
-      this.view.updateSettings(this.settings);
+    const view = this.getView();
+    if (view) {
+      view.updateSettings(this.settings);
     }
   }
   async activateView() {
@@ -3853,7 +3858,6 @@ var DashReaderPlugin = class extends import_obsidian4.Plugin {
     }
     if (leaf) {
       workspace.revealLeaf(leaf);
-      this.view = leaf.view;
     }
   }
 };
