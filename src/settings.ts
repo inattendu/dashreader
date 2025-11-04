@@ -77,10 +77,10 @@ export class DashReaderSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
-    containerEl.createEl('h2', { text: 'DashReader Settings' });
+    new Setting(containerEl).setName("DashReader Settings").setHeading();
 
     // Section: Lecture
-    containerEl.createEl('h3', { text: 'Reading Settings' });
+    new Setting(containerEl).setName("Reading Settings").setHeading();
 
     const wpmSetting = new Setting(containerEl)
       .setName('Words per minute (WPM)')
@@ -139,7 +139,7 @@ export class DashReaderSettingTab extends PluginSettingTab {
         }));
 
     // Section: Reading Enhancements
-    containerEl.createEl('h3', { text: 'Reading Enhancements' });
+    new Setting(containerEl).setName("Reading Enhancements").setHeading();
 
     new Setting(containerEl)
       .setName('Slow Start')
@@ -190,7 +190,7 @@ export class DashReaderSettingTab extends PluginSettingTab {
     );
 
     // Section: Apparence
-    containerEl.createEl('h3', { text: 'Appearance' });
+    new Setting(containerEl).setName("Appearance").setHeading();
 
     new Setting(containerEl)
       .setName('Highlight color')
@@ -226,7 +226,7 @@ export class DashReaderSettingTab extends PluginSettingTab {
         }));
 
     // Section: Context
-    containerEl.createEl('h3', { text: 'Context Display' });
+    new Setting(containerEl).setName("Context Display").setHeading();
 
     new Setting(containerEl)
       .setName('Show context')
@@ -253,7 +253,7 @@ export class DashReaderSettingTab extends PluginSettingTab {
     );
 
     // === Navigation Display ===
-    containerEl.createEl('h3', { text: 'Navigation' });
+    new Setting(containerEl).setName("Navigation").setHeading();
 
     new Setting(containerEl)
       .setName('Show minimap')
@@ -276,7 +276,7 @@ export class DashReaderSettingTab extends PluginSettingTab {
         }));
 
     // Section: Micropause
-    containerEl.createEl('h3', { text: 'Micropause' });
+    new Setting(containerEl).setName("Micropause").setHeading();
 
     new Setting(containerEl)
       .setName('Enable micropause')
@@ -401,7 +401,7 @@ export class DashReaderSettingTab extends PluginSettingTab {
     );
 
     // Section: Auto-start
-    containerEl.createEl('h3', { text: 'Auto-start' });
+    new Setting(containerEl).setName("Auto-start").setHeading();
 
     new Setting(containerEl)
       .setName('Auto-start reading')
@@ -428,7 +428,7 @@ export class DashReaderSettingTab extends PluginSettingTab {
     );
 
     // Section: Display
-    containerEl.createEl('h3', { text: 'Display Options' });
+    new Setting(containerEl).setName("Display Options").setHeading();
 
     new Setting(containerEl)
       .setName('Show progress bar')
@@ -451,7 +451,7 @@ export class DashReaderSettingTab extends PluginSettingTab {
         }));
 
     // Section: Hotkeys
-    containerEl.createEl('h3', { text: 'Keyboard Shortcuts' });
+    new Setting(containerEl).setName("Keyboard Shortcuts").setHeading();
     containerEl.createEl('p', {
       text: 'Note: Hotkey customization is available in Obsidian\'s Hotkeys settings.',
       cls: 'setting-item-description'
