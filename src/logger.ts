@@ -13,16 +13,16 @@ export class Logger {
   /**
    * Log debug information (only in debug mode)
    */
-  static debug(...args: any[]): void {
+  static debug(...args: unknown[]): void {
     if (DEBUG) {
-      console.log(this.prefix, ...args);
+      console.debug(this.prefix, ...args);
     }
   }
 
   /**
    * Log warnings (only in debug mode)
    */
-  static warn(...args: any[]): void {
+  static warn(...args: unknown[]): void {
     if (DEBUG) {
       console.warn(this.prefix, ...args);
     }
@@ -31,7 +31,7 @@ export class Logger {
   /**
    * Log errors (always shown)
    */
-  static error(...args: any[]): void {
+  static error(...args: unknown[]): void {
     console.error(this.prefix, ...args);
   }
 }
