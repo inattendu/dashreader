@@ -12,7 +12,7 @@ export class MarkdownParser {
     // 2. Protéger le contenu des blocs de code avec des marqueurs temporaires
     // Cela empêche les commentaires # dans le code d'être traités comme des headings
     const codeBlocks: string[] = [];
-    text = text.replace(/```[\w-]*\n?([\s\S]*?)```/g, (_match, code) => {
+    text = text.replace(/```[\w-]*\n?([\s\S]*?)```/g, (_match, code: string) => {
       const index = codeBlocks.length;
       codeBlocks.push(code);
       return `___CODE_BLOCK_${index}___`;
@@ -22,21 +22,21 @@ export class MarkdownParser {
     text = text.replace(/`([^`]+)`/g, '$1');
 
     // 4. Enlever les images ![alt](url) AVANT les liens
-    text = text.replace(/!\[([^\]]*)\]\([^\)]+\)/g, '');
+    text = text.replace(/!\[([^\]]*)\]\([^)]+\)/g, '');
 
     // 5. Enlever les liens [texte](url) -> garder texte
-    text = text.replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1');
+    text = text.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
 
     // 6. Enlever les wikilinks [[lien]] ou [[lien|alias]] -> garder alias ou lien
-    text = text.replace(/\[\[([^\]|]+)(\|([^\]]+))?\]\]/g, (_match, link, _pipe, alias) => {
+    text = text.replace(/\[\[([^\]|]+)(\|([^\]]+))?\]\]/g, (_match, link: string, _pipe: string | undefined, alias: string | undefined) => {
       return alias || link;
     });
 
     // 7. Enlever le bold/italic (dans l'ordre: **, __, *, _)
-    text = text.replace(/\*\*\*([^\*]+)\*\*\*/g, '$1'); // bold+italic ***
-    text = text.replace(/\*\*([^\*]+)\*\*/g, '$1'); // bold **
+    text = text.replace(/\*\*\*([^*]+)\*\*\*/g, '$1'); // bold+italic ***
+    text = text.replace(/\*\*([^*]+)\*\*/g, '$1'); // bold **
     text = text.replace(/__([^_]+)__/g, '$1'); // bold __
-    text = text.replace(/\*([^\*\n]+)\*/g, '$1'); // italic *
+    text = text.replace(/\*([^*\n]+)\*/g, '$1'); // italic *
     text = text.replace(/_([^_\n]+)_/g, '$1'); // italic _
 
     // 8. Enlever les strikethrough ~~texte~~
