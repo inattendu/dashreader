@@ -17,13 +17,13 @@ export default class DashReaderPlugin extends Plugin {
     );
 
     // Ajouter l'icône dans la ribbon
-    this.addRibbonIcon('zap', 'Open DashReader', () => {
+    this.addRibbonIcon('zap', 'Open speed reader', () => {
       void this.activateView();
     });
 
     // Command: Open DashReader
     this.addCommand({
-      id: 'dashreader',
+      id: 'open',
       name: 'Open RSVP reader',
       callback: () => {
         void this.activateView();
@@ -72,10 +72,10 @@ export default class DashReaderPlugin extends Plugin {
     // Command: Toggle Play/Pause
     this.addCommand({
       id: 'toggle-play-pause',
-      name: 'Toggle Play/Pause',
+      name: 'Toggle play/pause',
       callback: () => {
         // This command is handled by the view itself
-        new Notice('Use Shift+Space key when DashReader is active');
+        new Notice('Use Shift+Space key when speed reader is active');
       }
     });
 
@@ -86,7 +86,7 @@ export default class DashReaderPlugin extends Plugin {
         if (selection) {
           menu.addItem((item) => {
             item
-              .setTitle('Read with DashReader')
+              .setTitle('Read with speed reader')
               .setIcon('zap')
               .onClick(() => {
                 void this.activateView().then(() => {
@@ -128,7 +128,7 @@ export default class DashReaderPlugin extends Plugin {
   }
 
   async loadSettings() {
-    const rawSettings = await this.loadData();
+    const rawSettings = await this.loadData() as Partial<DashReaderSettings> | null;
     this.settings = validateSettings(rawSettings);
   }
 
@@ -162,7 +162,7 @@ export default class DashReaderPlugin extends Plugin {
     }
 
     if (leaf) {
-      workspace.revealLeaf(leaf);
+      void workspace.revealLeaf(leaf);
     }
   }
 }
