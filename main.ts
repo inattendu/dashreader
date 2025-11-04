@@ -6,7 +6,6 @@ import { validateSettings } from './src/services/settings-validator';
 
 export default class DashReaderPlugin extends Plugin {
   settings: DashReaderSettings;
-  private view: DashReaderView | null = null;
 
   async onload() {
     await this.loadSettings();
@@ -14,23 +13,20 @@ export default class DashReaderPlugin extends Plugin {
     // Enregistrer la vue
     this.registerView(
       VIEW_TYPE_DASHREADER,
-      (leaf) => {
-        this.view = new DashReaderView(leaf, this.settings);
-        return this.view;
-      }
+      (leaf) => new DashReaderView(leaf, this.settings)
     );
 
     // Ajouter l'icône dans la ribbon
     this.addRibbonIcon('zap', 'Open DashReader', () => {
-      this.activateView();
+      void this.activateView();
     });
 
     // Command: Open DashReader
     this.addCommand({
-      id: 'open-dashreader',
+      id: 'dashreader',
       name: 'Open RSVP reader',
       callback: () => {
-        this.activateView();
+        void this.activateView();
       }
     });
 
@@ -41,9 +37,10 @@ export default class DashReaderPlugin extends Plugin {
       editorCallback: (editor: Editor) => {
         const selection = editor.getSelection();
         if (selection) {
-          this.activateView().then(() => {
-            if (this.view) {
-              this.view.loadText(selection);
+          void this.activateView().then(() => {
+            const view = this.getView();
+            if (view) {
+              view.loadText(selection);
             }
           });
         } else {
@@ -60,9 +57,10 @@ export default class DashReaderPlugin extends Plugin {
         const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
         if (activeView) {
           const content = activeView.editor.getValue();
-          this.activateView().then(() => {
-            if (this.view) {
-              this.view.loadText(content);
+          void this.activateView().then(() => {
+            const view = this.getView();
+            if (view) {
+              view.loadText(content);
             }
           });
         } else {
@@ -91,9 +89,10 @@ export default class DashReaderPlugin extends Plugin {
               .setTitle('Read with DashReader')
               .setIcon('zap')
               .onClick(() => {
-                this.activateView().then(() => {
-                  if (this.view) {
-                    this.view.loadText(selection);
+                void this.activateView().then(() => {
+                  const view = this.getView();
+                  if (view) {
+                    view.loadText(selection);
                   }
                 });
               });
@@ -108,8 +107,9 @@ export default class DashReaderPlugin extends Plugin {
     // Mettre à jour la vue quand les paramètres changent
     this.registerEvent(
       this.app.workspace.on('layout-change', () => {
-        if (this.view) {
-          this.view.updateSettings(this.settings);
+        const view = this.getView();
+        if (view) {
+          view.updateSettings(this.settings);
         }
       })
     );
@@ -117,6 +117,14 @@ export default class DashReaderPlugin extends Plugin {
 
   onunload() {
     // Don't detach leaves here - let Obsidian restore them at original positions during updates
+  }
+
+  private getView(): DashReaderView | null {
+    const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_DASHREADER);
+    if (leaves.length > 0) {
+      return leaves[0].view as DashReaderView;
+    }
+    return null;
   }
 
   async loadSettings() {
@@ -127,8 +135,9 @@ export default class DashReaderPlugin extends Plugin {
   async saveSettings() {
     await this.saveData(this.settings);
     // Mettre à jour la vue si elle existe
-    if (this.view) {
-      this.view.updateSettings(this.settings);
+    const view = this.getView();
+    if (view) {
+      view.updateSettings(this.settings);
     }
   }
 
@@ -154,7 +163,6 @@ export default class DashReaderPlugin extends Plugin {
 
     if (leaf) {
       workspace.revealLeaf(leaf);
-      this.view = leaf.view as DashReaderView;
     }
   }
 }
