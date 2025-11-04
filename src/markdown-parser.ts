@@ -47,7 +47,7 @@ export class MarkdownParser {
 
     // 10. Marquer les headings avec leur niveau (#, ##, etc.)
     // # Titre → [H1]Titre, ## Titre → [H2]Titre, etc. (sans espace après le marqueur)
-    text = text.replace(/^(#{1,6})\s+(.+)$/gm, (_match, hashes, content) => {
+    text = text.replace(/^(#{1,6})\s+(.+)$/gm, (_match: string, hashes: string, content: string) => {
       const level = hashes.length;
       return `[H${level}]${content}`;
     });
@@ -55,7 +55,7 @@ export class MarkdownParser {
     // 11. Marquer les callouts Obsidian comme pseudo-headings
     // > [!type] Titre → [CALLOUT:type]Titre
     // Garde le contenu des lignes suivantes (gérées par l'étape suivante)
-    text = text.replace(/^>\s*\[!([\w-]+)\]\s*(.*)$/gm, (_match, type, title) => {
+    text = text.replace(/^>\s*\[!([\w-]+)\]\s*(.*)$/gm, (_match: string, type: string, title: string) => {
       // Si pas de titre, utiliser le type comme titre
       const displayTitle = title.trim() || type;
       return `[CALLOUT:${type}]${displayTitle}`;
@@ -98,7 +98,7 @@ export class MarkdownParser {
     text = text.replace(/[ \t]+$/gm, '');
 
     // 23. Restaurer le contenu des blocs de code
-    text = text.replace(/___CODE_BLOCK_(\d+)___/g, (_match, index) => {
+    text = text.replace(/___CODE_BLOCK_(\d+)___/g, (_match: string, index: string) => {
       return codeBlocks[parseInt(index)] || '';
     });
 

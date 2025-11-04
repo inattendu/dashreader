@@ -24,7 +24,7 @@ export default class DashReaderPlugin extends Plugin {
     // Command: Open DashReader
     this.addCommand({
       id: 'open',
-      name: 'Open RSVP reader',
+      name: 'Open speed reader',
       callback: () => {
         void this.activateView();
       }
