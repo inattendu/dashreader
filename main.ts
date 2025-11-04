@@ -122,7 +122,7 @@ export default class DashReaderPlugin extends Plugin {
   private getView(): DashReaderView | null {
     const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_DASHREADER);
     if (leaves.length > 0) {
-      return leaves[0].view as DashReaderView;
+      return leaves[0].view as unknown as DashReaderView;
     }
     return null;
   }

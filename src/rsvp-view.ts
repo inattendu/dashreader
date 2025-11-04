@@ -245,7 +245,7 @@ export class DashReaderView extends ItemView {
    * Called when the view is opened
    * Builds UI, sets up hotkeys, and registers auto-load
    */
-  onOpen(): void {
+  async onOpen(): Promise<void> {
     this.mainContainerEl = this.contentEl.createDiv({ cls: CSS_CLASSES.container });
     this.buildUI();
 
@@ -286,7 +286,7 @@ export class DashReaderView extends ItemView {
    * Called when the view is closed
    * Stops reading and cleans up resources
    */
-  onClose(): void {
+  async onClose(): Promise<void> {
     this.engine.stop();
     this.timeoutManager.clearAll();
     this.dom.clear();
