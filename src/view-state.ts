@@ -77,7 +77,7 @@
  * @param value - New value of the property
  * @param oldValue - Previous value of the property
  */
-type StateChangeListener = (key: string, value: any, oldValue: any) => void;
+type StateChangeListener = (key: string, value: unknown, oldValue: unknown) => void;
 
 /**
  * ViewState data interface - Shape of all view state
@@ -288,8 +288,8 @@ export class ViewState {
    * ```
    */
   reset(): void {
-    Object.entries(DEFAULT_VIEW_STATE).forEach(([key, value]) => {
-      this.set(key as keyof ViewStateData, value);
+    (Object.entries(DEFAULT_VIEW_STATE) as [keyof ViewStateData, ViewStateData[keyof ViewStateData]][]).forEach(([key, value]) => {
+      this.set(key, value);
     });
   }
 
@@ -336,7 +336,7 @@ export class ViewState {
    *
    * @private
    */
-  private notify(key: string, value: any, oldValue: any): void {
+  private notify(key: string, value: unknown, oldValue: unknown): void {
     this.listeners.forEach(listener => {
       try {
         listener(key, value, oldValue);
