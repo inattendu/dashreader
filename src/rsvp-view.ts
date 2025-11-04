@@ -53,7 +53,7 @@
 
 import { ItemView, WorkspaceLeaf } from 'obsidian';
 import { RSVPEngine } from './rsvp-engine';
-import { DashReaderSettings, WordChunk, HeadingContext, HeadingInfo } from './types';
+import { DashReaderSettings, WordChunk } from './types';
 import { MarkdownParser } from './markdown-parser';
 import { ViewState } from './view-state';
 import { DOMRegistry } from './dom-registry';
@@ -199,15 +199,15 @@ export class DashReaderView extends ItemView {
     // Initialize RSVP engine with callbacks
     this.engine = new RSVPEngine(
       settings,
-      this.onWordChange.bind(this),
-      this.onComplete.bind(this),
+      this.onWordChange.bind(this) as (chunk: WordChunk) => void,
+      this.onComplete.bind(this) as () => void,
       this.timeoutManager
     );
 
     // Initialize auto-load manager for editor integration
     this.autoLoadManager = new AutoLoadManager(
       this.app,
-      this.loadText.bind(this),
+      this.loadText.bind(this) as (text: string, source?: { fileName?: string; lineNumber?: number; cursorPosition?: number }) => void,
       () => this.mainContainerEl?.isShown() ?? false,
       this.timeoutManager
     );
@@ -230,7 +230,7 @@ export class DashReaderView extends ItemView {
    * @returns Display name
    */
   getDisplayText(): string {
-    return 'DashReader';
+    return 'Speed reader';
   }
 
   /**
@@ -245,7 +245,7 @@ export class DashReaderView extends ItemView {
    * Called when the view is opened
    * Builds UI, sets up hotkeys, and registers auto-load
    */
-  async onOpen(): Promise<void> {
+  onOpen(): void {
     this.mainContainerEl = this.contentEl.createDiv({ cls: CSS_CLASSES.container });
     this.buildUI();
 
@@ -286,7 +286,7 @@ export class DashReaderView extends ItemView {
    * Called when the view is closed
    * Stops reading and cleans up resources
    */
-  async onClose(): Promise<void> {
+  onClose(): void {
     this.engine.stop();
     this.timeoutManager.clearAll();
     this.dom.clear();
@@ -336,7 +336,7 @@ export class DashReaderView extends ItemView {
     createButton(this.toggleBar, {
       icon: ICONS.expand,
       title: 'Open in new tab',
-      onClick: () => this.openInNewTab(),
+      onClick: () => void this.openInNewTab(),
       className: CSS_CLASSES.toggleBtn,
     });
   }
@@ -407,8 +407,8 @@ export class DashReaderView extends ItemView {
   private buildProgressBar(): void {
     this.progressEl = this.mainContainerEl.createDiv({ cls: CSS_CLASSES.progressContainer });
     const progressBar = this.progressEl.createDiv({ cls: CSS_CLASSES.progressBar });
-    progressBar.style.width = '0%';
-    progressBar.style.background = this.settings.highlightColor;
+    // Set initial styles using setAttr for CSS properties
+    progressBar.setAttr('style', `width: 0%; background: ${this.settings.highlightColor}`);
     this.dom.register('progressBar', progressBar);
   }
 
@@ -692,7 +692,7 @@ export class DashReaderView extends ItemView {
       });
 
       // Reveal the new tab
-      workspace.revealLeaf(newLeaf);
+      void workspace.revealLeaf(newLeaf);
     }
   }
 
@@ -764,7 +764,7 @@ export class DashReaderView extends ItemView {
    * Sets up keyboard shortcuts for playback control
    */
   private setupHotkeys(): void {
-    document.addEventListener('keydown', this.handleKeyPress.bind(this));
+    document.addEventListener('keydown', this.handleKeyPress.bind(this) as (e: KeyboardEvent) => void);
   }
 
   /**
