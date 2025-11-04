@@ -2528,7 +2528,7 @@ var DashReaderView = class extends import_obsidian2.ItemView {
    * @returns Display name
    */
   getDisplayText() {
-    return "DashReader";
+    return "Speed reader";
   }
   /**
    * Returns the icon identifier for this view
@@ -2616,7 +2616,7 @@ var DashReaderView = class extends import_obsidian2.ItemView {
     createButton(this.toggleBar, {
       icon: ICONS.expand,
       title: "Open in new tab",
-      onClick: () => this.openInNewTab(),
+      onClick: () => void this.openInNewTab(),
       className: CSS_CLASSES.toggleBtn
     });
   }
@@ -2673,8 +2673,7 @@ var DashReaderView = class extends import_obsidian2.ItemView {
   buildProgressBar() {
     this.progressEl = this.mainContainerEl.createDiv({ cls: CSS_CLASSES.progressContainer });
     const progressBar = this.progressEl.createDiv({ cls: CSS_CLASSES.progressBar });
-    progressBar.style.width = "0%";
-    progressBar.style.background = this.settings.highlightColor;
+    progressBar.setAttr("style", `width: 0%; background: ${this.settings.highlightColor}`);
     this.dom.register("progressBar", progressBar);
   }
   /**
@@ -2912,7 +2911,7 @@ var DashReaderView = class extends import_obsidian2.ItemView {
         type: VIEW_TYPE_DASHREADER,
         active: true
       });
-      workspace.revealLeaf(newLeaf);
+      void workspace.revealLeaf(newLeaf);
     }
   }
   // ============================================================================
@@ -3226,12 +3225,7 @@ var DashReaderSettingTab = class extends import_obsidian3.PluginSettingTab {
    * Helper method to create a slider with an editable numeric display
    */
   createSliderWithInput(setting, min, max, step, value, unit = "", onChange) {
-    let inputEl;
-    setting.addSlider((slider) => slider.setLimits(min, max, step).setValue(value).setDynamicTooltip().onChange(async (newValue) => {
-      inputEl.value = newValue.toString();
-      await onChange(newValue);
-    }));
-    inputEl = setting.controlEl.createEl("input", {
+    const inputEl = setting.controlEl.createEl("input", {
       type: "text",
       value: value.toString(),
       cls: "dashreader-slider-input"
@@ -3242,7 +3236,11 @@ var DashReaderSettingTab = class extends import_obsidian3.PluginSettingTab {
         cls: "dashreader-slider-unit"
       });
     }
-    inputEl.addEventListener("change", async () => {
+    setting.addSlider((slider) => slider.setLimits(min, max, step).setValue(value).setDynamicTooltip().onChange(async (newValue) => {
+      inputEl.value = newValue.toString();
+      await onChange(newValue);
+    }));
+    inputEl.addEventListener("change", () => void (async () => {
       let newValue = parseFloat(inputEl.value);
       if (isNaN(newValue)) {
         newValue = value;
@@ -3256,14 +3254,14 @@ var DashReaderSettingTab = class extends import_obsidian3.PluginSettingTab {
         sliderEl.value = newValue.toString();
       }
       await onChange(newValue);
-    });
+    })());
   }
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    new import_obsidian3.Setting(containerEl).setName("DashReader Settings").setHeading();
-    new import_obsidian3.Setting(containerEl).setName("Reading Settings").setHeading();
-    const wpmSetting = new import_obsidian3.Setting(containerEl).setName("Words per minute (WPM)").setDesc("Reading speed (50-5000)");
+    new import_obsidian3.Setting(containerEl).setName("Dashreader settings").setHeading();
+    new import_obsidian3.Setting(containerEl).setName("Reading settings").setHeading();
+    const wpmSetting = new import_obsidian3.Setting(containerEl).setName("Words per minute").setDesc("Reading speed (50-5000)");
     this.createSliderWithInput(
       wpmSetting,
       50,
@@ -3306,8 +3304,8 @@ var DashReaderSettingTab = class extends import_obsidian3.PluginSettingTab {
       this.plugin.settings.fontFamily = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian3.Setting(containerEl).setName("Reading Enhancements").setHeading();
-    new import_obsidian3.Setting(containerEl).setName("Slow Start").setDesc("Gradually increase speed over first 5 words for comfortable start").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableSlowStart).onChange(async (value) => {
+    new import_obsidian3.Setting(containerEl).setName("Reading enhancements").setHeading();
+    new import_obsidian3.Setting(containerEl).setName("Slow start").setDesc("Gradually increase speed over first 5 words for comfortable start").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableSlowStart).onChange(async (value) => {
       this.plugin.settings.enableSlowStart = value;
       await this.plugin.saveSettings();
     }));
@@ -3328,7 +3326,7 @@ var DashReaderSettingTab = class extends import_obsidian3.PluginSettingTab {
         await this.plugin.saveSettings();
       }
     );
-    const accelTargetSetting = new import_obsidian3.Setting(containerEl).setName("Target WPM").setDesc("Target reading speed to reach (50-5000)");
+    const accelTargetSetting = new import_obsidian3.Setting(containerEl).setName("Target wpm").setDesc("Target reading speed to reach (50-5000)");
     this.createSliderWithInput(
       accelTargetSetting,
       50,
@@ -3354,7 +3352,7 @@ var DashReaderSettingTab = class extends import_obsidian3.PluginSettingTab {
       this.plugin.settings.backgroundColor = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian3.Setting(containerEl).setName("Context Display").setHeading();
+    new import_obsidian3.Setting(containerEl).setName("Context display").setHeading();
     new import_obsidian3.Setting(containerEl).setName("Show context").setDesc("Display words before and after current word").addToggle((toggle) => toggle.setValue(this.plugin.settings.showContext).onChange(async (value) => {
       this.plugin.settings.showContext = value;
       await this.plugin.saveSettings();
@@ -3451,7 +3449,7 @@ var DashReaderSettingTab = class extends import_obsidian3.PluginSettingTab {
         await this.plugin.saveSettings();
       }
     );
-    const sectionMarkersSetting = new import_obsidian3.Setting(containerEl).setName("Section markers pause").setDesc("Pause multiplier for 1., I., A., etc. (1.0-3.0)");
+    const sectionMarkersSetting = new import_obsidian3.Setting(containerEl).setName("Section markers pause").setDesc("Pause multiplier for 1., i., a., etc. (1.0-3.0)");
     this.createSliderWithInput(
       sectionMarkersSetting,
       1,
@@ -3508,7 +3506,7 @@ var DashReaderSettingTab = class extends import_obsidian3.PluginSettingTab {
         await this.plugin.saveSettings();
       }
     );
-    new import_obsidian3.Setting(containerEl).setName("Display Options").setHeading();
+    new import_obsidian3.Setting(containerEl).setName("Display options").setHeading();
     new import_obsidian3.Setting(containerEl).setName("Show progress bar").setDesc("Display reading progress bar").addToggle((toggle) => toggle.setValue(this.plugin.settings.showProgress).onChange(async (value) => {
       this.plugin.settings.showProgress = value;
       await this.plugin.saveSettings();
@@ -3517,9 +3515,9 @@ var DashReaderSettingTab = class extends import_obsidian3.PluginSettingTab {
       this.plugin.settings.showStats = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian3.Setting(containerEl).setName("Keyboard Shortcuts").setHeading();
+    new import_obsidian3.Setting(containerEl).setName("Keyboard shortcuts").setHeading();
     containerEl.createEl("p", {
-      text: "Note: Hotkey customization is available in Obsidian's Hotkeys settings.",
+      text: "Note: hotkey customization is available in Obsidian's hotkeys settings.",
       cls: "setting-item-description"
     });
   }
@@ -3742,12 +3740,12 @@ var DashReaderPlugin = class extends import_obsidian4.Plugin {
       VIEW_TYPE_DASHREADER,
       (leaf) => new DashReaderView(leaf, this.settings)
     );
-    this.addRibbonIcon("zap", "Open DashReader", () => {
+    this.addRibbonIcon("zap", "Open speed reader", () => {
       void this.activateView();
     });
     this.addCommand({
-      id: "dashreader",
-      name: "Open RSVP reader",
+      id: "open",
+      name: "Open speed reader",
       callback: () => {
         void this.activateView();
       }
@@ -3789,9 +3787,9 @@ var DashReaderPlugin = class extends import_obsidian4.Plugin {
     });
     this.addCommand({
       id: "toggle-play-pause",
-      name: "Toggle Play/Pause",
+      name: "Toggle play/pause",
       callback: () => {
-        new import_obsidian4.Notice("Use Shift+Space key when DashReader is active");
+        new import_obsidian4.Notice("Use Shift+Space key when speed reader is active");
       }
     });
     this.registerEvent(
@@ -3799,7 +3797,7 @@ var DashReaderPlugin = class extends import_obsidian4.Plugin {
         const selection = editor.getSelection();
         if (selection) {
           menu.addItem((item) => {
-            item.setTitle("Read with DashReader").setIcon("zap").onClick(() => {
+            item.setTitle("Read with speed reader").setIcon("zap").onClick(() => {
               void this.activateView().then(() => {
                 const view = this.getView();
                 if (view) {
@@ -3857,7 +3855,7 @@ var DashReaderPlugin = class extends import_obsidian4.Plugin {
       }
     }
     if (leaf) {
-      workspace.revealLeaf(leaf);
+      void workspace.revealLeaf(leaf);
     }
   }
 };
