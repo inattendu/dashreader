@@ -21,20 +21,8 @@ export class DashReaderSettingTab extends PluginSettingTab {
     unit: string = '',
     onChange: (value: number) => Promise<void>
   ): void {
-    let inputEl: HTMLInputElement;
-
-    // Add slider
-    setting.addSlider(slider => slider
-      .setLimits(min, max, step)
-      .setValue(value)
-      .setDynamicTooltip()
-      .onChange(async (newValue) => {
-        inputEl.value = newValue.toString();
-        await onChange(newValue);
-      }));
-
-    // Add editable input
-    inputEl = setting.controlEl.createEl('input', {
+    // Add editable input first
+    const inputEl = setting.controlEl.createEl('input', {
       type: 'text',
       value: value.toString(),
       cls: 'dashreader-slider-input'
@@ -48,8 +36,18 @@ export class DashReaderSettingTab extends PluginSettingTab {
       });
     }
 
+    // Add slider after input is created
+    setting.addSlider(slider => slider
+      .setLimits(min, max, step)
+      .setValue(value)
+      .setDynamicTooltip()
+      .onChange(async (newValue) => {
+        inputEl.value = newValue.toString();
+        await onChange(newValue);
+      }));
+
     // Update slider when input changes
-    inputEl.addEventListener('change', async () => {
+    inputEl.addEventListener('change', () => void (async () => {
       let newValue = parseFloat(inputEl.value);
 
       // Validate and clamp value
@@ -70,20 +68,20 @@ export class DashReaderSettingTab extends PluginSettingTab {
       }
 
       await onChange(newValue);
-    });
+    })());
   }
 
   display(): void {
     const { containerEl } = this;
     containerEl.empty();
 
-    new Setting(containerEl).setName("DashReader Settings").setHeading();
+    new Setting(containerEl).setName("Dashreader settings").setHeading();
 
     // Section: Lecture
-    new Setting(containerEl).setName("Reading Settings").setHeading();
+    new Setting(containerEl).setName("Reading settings").setHeading();
 
     const wpmSetting = new Setting(containerEl)
-      .setName('Words per minute (WPM)')
+      .setName('Words per minute')
       .setDesc('Reading speed (50-5000)');
     this.createSliderWithInput(
       wpmSetting,
@@ -139,10 +137,10 @@ export class DashReaderSettingTab extends PluginSettingTab {
         }));
 
     // Section: Reading Enhancements
-    new Setting(containerEl).setName("Reading Enhancements").setHeading();
+    new Setting(containerEl).setName("Reading enhancements").setHeading();
 
     new Setting(containerEl)
-      .setName('Slow Start')
+      .setName('Slow start')
       .setDesc('Gradually increase speed over first 5 words for comfortable start')
       .addToggle(toggle => toggle
         .setValue(this.plugin.settings.enableSlowStart)
@@ -176,7 +174,7 @@ export class DashReaderSettingTab extends PluginSettingTab {
     );
 
     const accelTargetSetting = new Setting(containerEl)
-      .setName('Target WPM')
+      .setName('Target wpm')
       .setDesc('Target reading speed to reach (50-5000)');
     this.createSliderWithInput(
       accelTargetSetting,
@@ -226,7 +224,7 @@ export class DashReaderSettingTab extends PluginSettingTab {
         }));
 
     // Section: Context
-    new Setting(containerEl).setName("Context Display").setHeading();
+    new Setting(containerEl).setName("Context display").setHeading();
 
     new Setting(containerEl)
       .setName('Show context')
@@ -360,7 +358,7 @@ export class DashReaderSettingTab extends PluginSettingTab {
 
     const sectionMarkersSetting = new Setting(containerEl)
       .setName('Section markers pause')
-      .setDesc('Pause multiplier for 1., I., A., etc. (1.0-3.0)');
+      .setDesc('Pause multiplier for 1., i., a., etc. (1.0-3.0)');
     this.createSliderWithInput(
       sectionMarkersSetting,
       1.0, 3.0, 0.1,
@@ -428,7 +426,7 @@ export class DashReaderSettingTab extends PluginSettingTab {
     );
 
     // Section: Display
-    new Setting(containerEl).setName("Display Options").setHeading();
+    new Setting(containerEl).setName("Display options").setHeading();
 
     new Setting(containerEl)
       .setName('Show progress bar')
@@ -451,9 +449,9 @@ export class DashReaderSettingTab extends PluginSettingTab {
         }));
 
     // Section: Hotkeys
-    new Setting(containerEl).setName("Keyboard Shortcuts").setHeading();
+    new Setting(containerEl).setName("Keyboard shortcuts").setHeading();
     containerEl.createEl('p', {
-      text: 'Note: Hotkey customization is available in Obsidian\'s Hotkeys settings.',
+      text: 'Note: hotkey customization is available in Obsidian\'s hotkeys settings.',
       cls: 'setting-item-description'
     });
   }
