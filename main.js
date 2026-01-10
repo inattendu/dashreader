@@ -27,10 +27,10 @@ __export(main_exports, {
   default: () => DashReaderPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian4 = require("obsidian");
+var import_obsidian6 = require("obsidian");
 
 // src/rsvp-view.ts
-var import_obsidian2 = require("obsidian");
+var import_obsidian4 = require("obsidian");
 
 // src/services/micropause-service.ts
 var _HeadingStrategy = class {
@@ -159,9 +159,10 @@ var MicropauseService = class {
    * Recreates strategies with updated multipliers
    *
    * @param settings - New settings
+   * @param enableOverride - Optional override for enableMicropause (used by mobile profile)
    */
-  updateSettings(settings) {
-    this.enabled = settings.enableMicropause;
+  updateSettings(settings, enableOverride) {
+    this.enabled = enableOverride !== void 0 ? enableOverride : settings.enableMicropause;
     this.strategies = [
       new HeadingStrategy(),
       new CalloutStrategy(settings.micropauseCallouts),
@@ -189,6 +190,14 @@ var RSVPEngine = class {
     this.lastPauseTime = 0;
     this.headings = [];
     this.wordsReadInSession = 0;
+    // Virtual Timeline: pre-calculated cumulative times for each word
+    this.virtualTimeAtIndexMs = [];
+    this.virtualTotalMs = 0;
+    // Precise timing with drift compensation
+    this.tickGen = 0;
+    this.nextDueMs = null;
+    // Mobile profile mode
+    this.useMobileProfile = false;
     this.settings = settings;
     this.onWordChange = onWordChange;
     this.onComplete = onComplete;
@@ -211,6 +220,62 @@ var RSVPEngine = class {
     } else {
       this.currentIndex = 0;
     }
+    this.rebuildVirtualTimeline();
+  }
+  /**
+   * Pre-calculates cumulative times for all words
+   * This enables accurate time estimation and time-based navigation
+   */
+  rebuildVirtualTimeline() {
+    const n = this.words.length;
+    this.virtualTimeAtIndexMs = new Array(n).fill(0);
+    this.virtualTotalMs = 0;
+    if (n === 0)
+      return;
+    let tMs = 0;
+    let sessionWordCount = 0;
+    const SLOW_START_WORDS = 5;
+    for (let i = 0; i < n; i++) {
+      this.virtualTimeAtIndexMs[i] = tMs;
+      const word = this.words[i];
+      if (word === "\n")
+        continue;
+      const wpm = this.getWpmAtElapsedSeconds(tMs / 1e3);
+      const baseDelay = 60 / wpm * 1e3;
+      const multiplier = this.micropauseService.calculateMultiplier(word);
+      let delay = baseDelay * multiplier;
+      if (this.getEnableSlowStartSetting() && sessionWordCount < SLOW_START_WORDS) {
+        const remainingSlowWords = SLOW_START_WORDS - sessionWordCount;
+        const slowStartMultiplier = 1 + remainingSlowWords / SLOW_START_WORDS;
+        delay *= slowStartMultiplier;
+      }
+      sessionWordCount++;
+      tMs += Math.max(0, delay);
+    }
+    this.virtualTotalMs = tMs;
+  }
+  /**
+   * Gets the WPM at a given elapsed time (for acceleration calculation)
+   * Uses mobile-aware base WPM
+   * @param elapsedSeconds - Virtual elapsed time in seconds
+   */
+  getWpmAtElapsedSeconds(elapsedSeconds) {
+    const baseWpm = this.getWpmSetting();
+    if (!this.settings.enableAcceleration) {
+      return baseWpm;
+    }
+    if (elapsedSeconds >= this.settings.accelerationDuration) {
+      return this.settings.accelerationTargetWpm;
+    }
+    const progress = elapsedSeconds / this.settings.accelerationDuration;
+    const wpmDiff = this.settings.accelerationTargetWpm - baseWpm;
+    return Math.round(baseWpm + wpmDiff * progress);
+  }
+  /**
+   * Returns monotonic time in milliseconds (more precise than Date.now())
+   */
+  nowMs() {
+    return typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
   }
   play() {
     if (this.isPlaying)
@@ -219,13 +284,16 @@ var RSVPEngine = class {
       this.currentIndex = 0;
     }
     this.isPlaying = true;
+    this.tickGen++;
     if (this.startTime === 0) {
       this.startTime = Date.now();
       this.startWpm = this.settings.wpm;
       this.wordsReadInSession = 0;
+      this.nextDueMs = null;
     } else if (this.lastPauseTime > 0) {
       this.pausedTime += Date.now() - this.lastPauseTime;
       this.lastPauseTime = 0;
+      this.nextDueMs = null;
     }
     this.displayNextWord();
   }
@@ -245,6 +313,7 @@ var RSVPEngine = class {
     this.lastPauseTime = 0;
     this.startWpm = 0;
     this.wordsReadInSession = 0;
+    this.nextDueMs = null;
   }
   reset() {
     this.stop();
@@ -282,10 +351,11 @@ var RSVPEngine = class {
       }
       return;
     }
+    const gen = this.tickGen;
     const chunk = this.getChunk(this.currentIndex);
     this.onWordChange(chunk);
     let delay = this.calculateDelay(chunk.text);
-    if (this.settings.enableSlowStart) {
+    if (this.getEnableSlowStartSetting()) {
       const SLOW_START_WORDS = 5;
       if (this.wordsReadInSession < SLOW_START_WORDS) {
         const remainingSlowWords = SLOW_START_WORDS - this.wordsReadInSession;
@@ -294,14 +364,27 @@ var RSVPEngine = class {
       }
     }
     this.wordsReadInSession++;
-    this.currentIndex += this.settings.chunkSize;
+    this.currentIndex += this.getChunkSizeSetting();
+    const now = this.nowMs();
+    if (this.nextDueMs === null) {
+      this.nextDueMs = now;
+    }
+    this.nextDueMs += delay;
+    let waitMs = this.nextDueMs - now;
+    if (waitMs < -250) {
+      this.nextDueMs = now + delay;
+      waitMs = delay;
+    }
     this.timer = this.timeoutManager.setTimeout(() => {
+      if (gen !== this.tickGen)
+        return;
       this.displayNextWord();
-    }, delay);
+    }, Math.max(0, waitMs));
   }
   getChunk(startIndex) {
+    const chunkSize = this.getChunkSizeSetting();
     const endIndex = Math.min(
-      startIndex + this.settings.chunkSize,
+      startIndex + chunkSize,
       this.words.length
     );
     const chunkWords = this.words.slice(startIndex, endIndex);
@@ -315,8 +398,9 @@ var RSVPEngine = class {
     };
   }
   getCurrentWpm() {
+    const baseWpm = this.getWpmSetting();
     if (!this.settings.enableAcceleration || this.startTime === 0) {
-      return this.settings.wpm;
+      return baseWpm;
     }
     const elapsed = (Date.now() - this.startTime - this.pausedTime) / 1e3;
     if (elapsed >= this.settings.accelerationDuration) {
@@ -469,7 +553,78 @@ var RSVPEngine = class {
   }
   updateSettings(settings) {
     this.settings = settings;
-    this.micropauseService.updateSettings(settings);
+    this.micropauseService.updateSettings(settings, this.getEnableMicropauseSetting());
+    this.rebuildVirtualTimeline();
+  }
+  // ============================================================================
+  // MOBILE PROFILE SUPPORT
+  // ============================================================================
+  /**
+   * Enables or disables mobile profile mode
+   * When enabled, mobile-specific settings override desktop settings
+   */
+  setUseMobileProfile(useMobile) {
+    this.useMobileProfile = useMobile;
+    this.micropauseService.updateSettings(this.settings, this.getEnableMicropauseSetting());
+    this.rebuildVirtualTimeline();
+  }
+  /**
+   * Returns whether mobile profile is active
+   */
+  getUseMobileProfile() {
+    return this.useMobileProfile;
+  }
+  /**
+   * Gets the effective WPM setting (mobile or desktop)
+   */
+  getWpmSetting() {
+    return this.useMobileProfile ? this.settings.mobileWpm : this.settings.wpm;
+  }
+  /**
+   * Gets the effective chunk size setting (mobile or desktop)
+   */
+  getChunkSizeSetting() {
+    return this.useMobileProfile ? this.settings.mobileChunkSize : this.settings.chunkSize;
+  }
+  /**
+   * Gets the effective slow start setting (mobile or desktop)
+   */
+  getEnableSlowStartSetting() {
+    return this.useMobileProfile ? this.settings.mobileEnableSlowStart : this.settings.enableSlowStart;
+  }
+  /**
+   * Gets the effective micropause setting (mobile or desktop)
+   */
+  getEnableMicropauseSetting() {
+    return this.useMobileProfile ? this.settings.mobileEnableMicropause : this.settings.enableMicropause;
+  }
+  /**
+   * Gets the effective font size setting (mobile or desktop)
+   * Note: This is used by the view, not the engine
+   */
+  getEffectiveFontSize() {
+    return this.useMobileProfile ? this.settings.mobileFontSize : this.settings.fontSize;
+  }
+  /**
+   * Gets the effective show breadcrumb setting (mobile or desktop)
+   * Note: This is used by the view, not the engine
+   */
+  getEffectiveShowBreadcrumb() {
+    return this.useMobileProfile ? this.settings.mobileShowBreadcrumb : this.settings.showBreadcrumb;
+  }
+  /**
+   * Gets the effective context words setting (mobile or desktop)
+   * Note: This is used by the view, not the engine
+   */
+  getEffectiveContextWords() {
+    return this.useMobileProfile ? this.settings.mobileContextWords : this.settings.contextWords;
+  }
+  /**
+   * Gets the effective context font size setting (mobile or desktop)
+   * Note: This is used by the view, not the engine
+   */
+  getEffectiveContextFontSize() {
+    return this.useMobileProfile ? this.settings.mobileContextFontSize : this.settings.contextFontSize;
   }
   getEstimatedDuration() {
     if (this.words.length === 0)
@@ -507,6 +662,41 @@ var RSVPEngine = class {
     const currentWpm = this.getCurrentWpm();
     return this.calculateAccurateRemainingTime(currentWpm);
   }
+  /**
+   * Returns the total estimated duration for the entire document (from start to end)
+   * This is a fixed value that doesn't change with current position
+   */
+  getTotalEstimatedDuration() {
+    if (this.words.length === 0)
+      return 0;
+    const averageWpm = this.settings.enableAcceleration ? (this.settings.wpm + this.settings.accelerationTargetWpm) / 2 : this.settings.wpm;
+    return this.calculateTimeForRange(0, this.words.length, averageWpm);
+  }
+  /**
+   * Returns the estimated time to reach the current position (from start)
+   * Used for displaying "elapsed" time based on position, not real time
+   */
+  getEstimatedTimeAtCurrentPosition() {
+    if (this.words.length === 0 || this.currentIndex === 0)
+      return 0;
+    const averageWpm = this.settings.enableAcceleration ? (this.settings.wpm + this.settings.accelerationTargetWpm) / 2 : this.settings.wpm;
+    return this.calculateTimeForRange(0, this.currentIndex, averageWpm);
+  }
+  /**
+   * Calculates the estimated reading time for a range of words
+   */
+  calculateTimeForRange(startIndex, endIndex, wpm) {
+    if (startIndex >= endIndex)
+      return 0;
+    let totalTimeMs = 0;
+    const baseDelay = 60 / wpm * 1e3;
+    for (let i = startIndex; i < endIndex; i++) {
+      const word = this.words[i];
+      const multiplier = this.micropauseService.calculateMultiplier(word);
+      totalTimeMs += baseDelay * multiplier;
+    }
+    return Math.ceil(totalTimeMs / 1e3);
+  }
   getCurrentWpmPublic() {
     return this.getCurrentWpm();
   }
@@ -516,6 +706,130 @@ var RSVPEngine = class {
    */
   getHeadings() {
     return this.headings;
+  }
+  /**
+   * Returns the words array for direct access
+   * Used by fullscreen modal to display current word
+   */
+  getWords() {
+    return this.words;
+  }
+  /**
+   * Returns the current onWordChange callback
+   * Used by fullscreen modal to save and restore callbacks
+   */
+  getOnWordChangeCallback() {
+    return this.onWordChange;
+  }
+  /**
+   * Returns the current onComplete callback
+   * Used by fullscreen modal to save and restore callbacks
+   */
+  getOnCompleteCallback() {
+    return this.onComplete;
+  }
+  /**
+   * Sets new callbacks for word change and completion
+   * Used by fullscreen modal to redirect engine events
+   */
+  setCallbacks(onWordChange, onComplete) {
+    this.onWordChange = onWordChange;
+    this.onComplete = onComplete;
+  }
+  /**
+   * Navigates to a specific word index
+   * Used by minimap and fullscreen navigation
+   */
+  goToIndex(index) {
+    this.currentIndex = Math.max(0, Math.min(index, this.words.length - 1));
+    if (this.isPlaying) {
+      this.pause();
+      this.play();
+    } else {
+      this.displayCurrentWord();
+    }
+  }
+  // ============================================================================
+  // VIRTUAL TIMELINE PUBLIC METHODS
+  // ============================================================================
+  /**
+   * Returns the total virtual duration in seconds
+   * Pre-calculated for accuracy
+   */
+  getVirtualTotalSeconds() {
+    return Math.round(this.virtualTotalMs / 1e3);
+  }
+  /**
+   * Returns the virtual elapsed time at a specific word index
+   * @param index - Word index
+   */
+  getVirtualElapsedSecondsAtIndex(index) {
+    const idx = Math.max(0, Math.min(index, this.words.length - 1));
+    return Math.round((this.virtualTimeAtIndexMs[idx] || 0) / 1e3);
+  }
+  /**
+   * Returns the virtual elapsed time at current position
+   */
+  getVirtualElapsedSeconds() {
+    return this.getVirtualElapsedSecondsAtIndex(this.currentIndex);
+  }
+  /**
+   * Returns the virtual remaining time from current position
+   */
+  getVirtualRemainingSeconds() {
+    return Math.max(0, this.getVirtualTotalSeconds() - this.getVirtualElapsedSeconds());
+  }
+  /**
+   * Finds the word index closest to a target time (in seconds)
+   * Uses binary search for efficiency
+   * @param targetSeconds - Target time in seconds
+   */
+  findIndexAtTime(targetSeconds) {
+    const targetMs = targetSeconds * 1e3;
+    const n = this.virtualTimeAtIndexMs.length;
+    if (n === 0)
+      return 0;
+    if (targetMs <= 0)
+      return 0;
+    if (targetMs >= this.virtualTotalMs)
+      return n - 1;
+    let lo = 0;
+    let hi = n - 1;
+    while (lo < hi) {
+      const mid = Math.floor((lo + hi + 1) / 2);
+      if (this.virtualTimeAtIndexMs[mid] <= targetMs) {
+        lo = mid;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    return lo;
+  }
+  /**
+   * Navigate to a specific time position (in seconds)
+   * @param seconds - Target time in seconds
+   */
+  goToTime(seconds) {
+    const index = this.findIndexAtTime(seconds);
+    this.goToIndex(index);
+  }
+  /**
+   * Rewind by a specified number of seconds
+   * @param seconds - Seconds to rewind (default: 10)
+   */
+  rewindSeconds(seconds = 10) {
+    const currentTime = this.getVirtualElapsedSeconds();
+    const targetTime = Math.max(0, currentTime - seconds);
+    this.goToTime(targetTime);
+  }
+  /**
+   * Forward by a specified number of seconds
+   * @param seconds - Seconds to forward (default: 10)
+   */
+  forwardSeconds(seconds = 10) {
+    const currentTime = this.getVirtualElapsedSeconds();
+    const targetTime = currentTime + seconds;
+    this.goToTime(targetTime);
   }
 };
 
@@ -917,7 +1231,24 @@ var ICONS = {
   /** Book/reading indicator */
   book: "\u{1F4D6}",
   /** Expand to new tab */
-  expand: "\u2922"
+  expand: "\u2922",
+  // Lucide icons for fullscreen controls
+  /** Jump to start (Lucide) */
+  jumpStart: "lucide:chevrons-left",
+  /** Previous heading (Lucide) */
+  prevHeading: "lucide:arrow-up",
+  /** Rewind/left arrow (Lucide) */
+  arrowLeft: "lucide:arrow-left",
+  /** Forward/right arrow (Lucide) */
+  arrowRight: "lucide:arrow-right",
+  /** Next heading (Lucide) */
+  nextHeading: "lucide:arrow-down",
+  /** Jump to end (Lucide) */
+  jumpEnd: "lucide:chevrons-right",
+  /** Play (Lucide) */
+  playLucide: "lucide:play",
+  /** Pause (Lucide) */
+  pauseLucide: "lucide:pause"
 };
 var HEADING_MULTIPLIERS = {
   /** H1 heading multiplier (1.5x base font = major section) */
@@ -1065,7 +1396,7 @@ var DOMRegistry = class {
   toggleClass(key, className, force) {
     const element = this.elements.get(key);
     if (element) {
-      element.toggleClass(className, force);
+      element.classList.toggle(className, force);
     }
   }
   /**
@@ -1487,7 +1818,7 @@ var BreadcrumbManager = class {
 
 // src/word-display.ts
 var WordDisplay = class {
-  constructor(wordEl, settings) {
+  constructor(wordEl, settings, displayArea) {
     /**
      * Callout icon mapping
      */
@@ -1507,23 +1838,45 @@ var WordDisplay = class {
     };
     this.wordEl = wordEl;
     this.settings = settings;
+    this.baseFontSizePx = settings.fontSize;
+    this.baseChunkSize = settings.chunkSize || 1;
+    this.wordEl.empty();
+    this.wordEl.style.position = "relative";
+    this.wordEl.setAttribute("data-running", "false");
+    this.overlayEl = this.wordEl.createDiv({ cls: "dashreader-focus-overlay" });
+    this.overlayEl.createDiv({ cls: "dashreader-focus-lines" });
+    this.focusDashesEl = this.overlayEl.createDiv({ cls: "dashreader-focus-dashes" });
+    this.contentEl = this.wordEl.createDiv({ cls: "dashreader-word-content" });
+    this.wordEl.style.setProperty("--dashreader-focus-left", "48%");
+  }
+  /**
+   * Sets the display area reference (kept for API compatibility)
+   */
+  setDisplayArea(displayArea) {
+  }
+  /**
+   * Sets base font size for calculations
+   */
+  setBaseFontSize(px) {
+    this.baseFontSizePx = px;
+  }
+  /**
+   * Sets chunk size for focus position calculations
+   */
+  setChunkSize(n) {
+    this.baseChunkSize = Math.max(1, n);
   }
   /**
    * Updates settings (when user changes font size, etc.)
-   *
-   * @param settings - New settings to apply
    */
   updateSettings(settings) {
     this.settings = settings;
+    this.baseFontSizePx = settings.fontSize;
+    this.baseChunkSize = settings.chunkSize || 1;
   }
   /**
    * Displays a word with optional heading level or callout type
-   * Handles font size adjustment, icons, and separators
-   *
-   * @param word - The word to display
-   * @param headingLevel - Heading level (1-6) or 0 for normal text/callouts
-   * @param showSeparator - Whether to show separator line before heading/callout
-   * @param calloutType - Callout type (note, abstract, info, etc.) if this is a callout
+   * Handles font size adjustment, icons, separators, and ORP anchoring
    */
   displayWord(word, headingLevel, showSeparator = false, calloutType) {
     let fontSizeMultiplier = 1;
@@ -1546,12 +1899,20 @@ var WordDisplay = class {
       fontSizeMultiplier = multipliers[headingLevel] || 1;
       fontWeight = "bold";
     }
-    const adjustedFontSize = this.settings.fontSize * fontSizeMultiplier;
-    this.wordEl.empty();
-    if (showSeparator) {
-      this.wordEl.createDiv({ cls: "dashreader-heading-separator" });
-    }
-    const wordContainer = this.wordEl.createDiv({ cls: "dashreader-word-with-heading" });
+    const adjustedFontSize = this.baseFontSizePx * fontSizeMultiplier;
+    const cleaned = this.stripMarkers(word).trim();
+    const displayText = cleaned.length ? cleaned : word.trim();
+    const chunkSize = Math.max(1, this.baseChunkSize);
+    const center = 48;
+    const left = 15;
+    const maxChunkForFullShift = 5;
+    const t = Math.min(1, Math.max(0, (chunkSize - 1) / (maxChunkForFullShift - 1)));
+    const focus = center - t * (center - left);
+    this.wordEl.style.setProperty("--dashreader-focus-left", `${focus}%`);
+    this.wordEl.setAttribute("data-running", "true");
+    this.wordEl.querySelectorAll(".dashreader-welcome-message, .dashreader-ready-message").forEach((el) => el.remove());
+    this.contentEl.empty();
+    const wordContainer = this.contentEl.createDiv({ cls: "dashreader-word-with-heading" });
     wordContainer.style.fontSize = `${adjustedFontSize}px`;
     wordContainer.style.fontWeight = fontWeight;
     if (iconPrefix) {
@@ -1560,51 +1921,181 @@ var WordDisplay = class {
         cls: "dashreader-callout-icon"
       });
     }
-    this.addProcessedWord(wordContainer, word);
+    const viewport = wordContainer.createDiv({ cls: "dashreader-orp-viewport" });
+    const line = viewport.createDiv({ cls: "dashreader-orp-line" });
+    const orpEl = this.buildWordSpans(line, displayText);
+    const focusWordEl = line.querySelector(".dashreader-focus-word");
+    const isFullscreen = this.wordEl.classList.contains("dashreader-fullscreen-word");
+    const shouldShrink = isFullscreen && displayText !== "\n" && displayText.trim().length > 0;
+    requestAnimationFrame(() => {
+      wordContainer.style.fontSize = `${adjustedFontSize}px`;
+      if (viewport.clientWidth === 0) {
+        requestAnimationFrame(() => {
+          wordContainer.style.fontSize = `${adjustedFontSize}px`;
+          if (shouldShrink) {
+            const minSize = Math.max(8, this.settings.minTokenFontSize || 12);
+            this.shrinkFocusWordToFit(viewport, line, focusWordEl, orpEl, adjustedFontSize, minSize);
+          }
+          this.applyOrpAnchoring(viewport, line, orpEl);
+        });
+        return;
+      }
+      if (shouldShrink) {
+        const minSize = Math.max(8, this.settings.minTokenFontSize || 12);
+        this.shrinkFocusWordToFit(viewport, line, focusWordEl, orpEl, adjustedFontSize, minSize);
+      }
+      this.applyOrpAnchoring(viewport, line, orpEl);
+    });
   }
   /**
-   * Adds a processed word to the container using DOM API
-   * This prevents XSS attacks by never using innerHTML with user content
-   *
-   * @param container - Container element to add word to
-   * @param rawWord - Raw word (may contain special characters)
+   * Strip heading and callout markers from word
    */
-  addProcessedWord(container, rawWord) {
-    if (rawWord === "\n") {
-      container.createEl("br");
+  stripMarkers(rawWord) {
+    return rawWord.replace(/^\[H\d\]/, "").replace(/^\[CALLOUT:[\w-]+\]/, "");
+  }
+  /**
+   * Calculates the Optimal Recognition Point (ORP) index for a word
+   * Based on the Squirt speed reading algorithm
+   */
+  getORPIndex(word) {
+    const str = word.endsWith("\n") ? word.slice(0, -1) : word;
+    const len = str.length;
+    if (len <= 0)
+      return 0;
+    let point = 4;
+    if (len < 2)
+      point = 0;
+    else if (len < 6)
+      point = 1;
+    else if (len < 10)
+      point = 2;
+    else if (len < 14)
+      point = 3;
+    const isLetterOrDigit = (ch) => !!ch && (/\d/.test(ch) || ch.toLowerCase() !== ch.toUpperCase());
+    if (!isLetterOrDigit(str[point])) {
+      if (isLetterOrDigit(str[point - 1]))
+        point--;
+      else if (isLetterOrDigit(str[point + 1]))
+        point++;
+    }
+    if (point < 0)
+      point = 0;
+    if (point >= str.length)
+      point = str.length - 1;
+    return point;
+  }
+  /**
+   * Builds spans for the word with ORP highlighting
+   * Returns the ORP span element
+   */
+  buildWordSpans(lineEl, displayWord) {
+    lineEl.empty();
+    if (!displayWord || displayWord === "\n")
+      return null;
+    const focusWordEl = lineEl.createSpan({ cls: "dashreader-focus-word" });
+    const orpIndex = this.getORPIndex(displayWord);
+    for (let i = 0; i < displayWord.length; i++) {
+      const ch = displayWord.charAt(i);
+      const span = focusWordEl.createSpan({ text: ch });
+      if (i === orpIndex) {
+        span.addClass("dashreader-highlight");
+        span.addClass("dashreader-orp");
+      }
+    }
+    return focusWordEl.querySelector(".dashreader-orp");
+  }
+  /**
+   * Applies ORP anchoring by shifting the line so ORP aligns with the focus dashes.
+   * Uses viewport-local coordinates like the fork does.
+   */
+  applyOrpAnchoring(viewportEl, lineEl, orpEl) {
+    if (!orpEl) {
+      lineEl.style.transform = "translateX(0px)";
       return;
     }
-    const word = rawWord.replace(/^\[H\d\]/, "").replace(/^\[CALLOUT:[\w-]+\]/, "");
-    if (word.length > 0) {
-      const centerIndex = Math.floor(word.length / 3);
-      const before = word.substring(0, centerIndex);
-      const center = word.charAt(centerIndex);
-      const after = word.substring(centerIndex + 1);
-      if (before) {
-        container.createSpan({ text: before });
-      }
-      container.createSpan({
-        text: center,
-        cls: "dashreader-highlight"
-      });
-      if (after) {
-        container.createSpan({ text: after });
-      }
-    } else {
-      container.setText(word);
+    lineEl.style.transform = "translateX(0px)";
+    const viewportRect = viewportEl.getBoundingClientRect();
+    if (viewportRect.width === 0) {
+      lineEl.style.transform = "translateX(0px)";
+      return;
     }
+    const focusRect = this.focusDashesEl.getBoundingClientRect();
+    if (focusRect.width === 0) {
+      const orpCenterInLine2 = orpEl.offsetLeft + orpEl.offsetWidth / 2;
+      const lineLeft2 = lineEl.offsetLeft;
+      const viewportCenter = viewportRect.width / 2;
+      const delta2 = viewportCenter - (lineLeft2 + orpCenterInLine2);
+      const maxDelta2 = viewportRect.width / 2;
+      const clampedDelta2 = Math.max(-maxDelta2, Math.min(maxDelta2, delta2));
+      lineEl.style.transform = `translateX(${Math.round(clampedDelta2)}px)`;
+      return;
+    }
+    const focusX = focusRect.left + focusRect.width / 2 - viewportRect.left;
+    const lineLeft = lineEl.offsetLeft;
+    const orpCenterInLine = orpEl.offsetLeft + orpEl.offsetWidth / 2;
+    const delta = focusX - (lineLeft + orpCenterInLine);
+    const maxDelta = viewportRect.width;
+    const clampedDelta = Math.max(-maxDelta, Math.min(maxDelta, delta));
+    lineEl.style.transform = `translateX(${Math.round(clampedDelta)}px)`;
+  }
+  /**
+   * Binary-search shrink for a single token if it overflows the viewport
+   */
+  shrinkFocusWordToFit(viewportEl, lineEl, focusWordEl, orpEl, startSize, minSize) {
+    if (!focusWordEl || !orpEl)
+      return startSize;
+    const prevTransition = focusWordEl.style.transition;
+    focusWordEl.style.transition = "none";
+    const fitsFocusWord = () => {
+      const vw = viewportEl.clientWidth;
+      if (vw <= 0)
+        return true;
+      const viewportRect = viewportEl.getBoundingClientRect();
+      const fRect = this.focusDashesEl.getBoundingClientRect();
+      const focusX = fRect.left + fRect.width / 2 - viewportRect.left;
+      if (focusX < 0 || focusX > vw)
+        return true;
+      const orpCenter = orpEl.offsetLeft + orpEl.offsetWidth / 2;
+      const wordLeft = focusWordEl.offsetLeft;
+      const wordRight = wordLeft + focusWordEl.offsetWidth;
+      const leftDist = orpCenter - wordLeft;
+      const rightDist = wordRight - orpCenter;
+      const leftEdge = focusX - leftDist;
+      const rightEdge = focusX + rightDist;
+      return leftEdge >= 0 && rightEdge <= vw;
+    };
+    focusWordEl.style.fontSize = `${startSize}px`;
+    lineEl.getBoundingClientRect();
+    if (fitsFocusWord()) {
+      focusWordEl.style.transition = prevTransition;
+      return startSize;
+    }
+    let lo = Math.max(8, minSize);
+    let hi = startSize;
+    let best = lo;
+    while (lo <= hi) {
+      const mid = Math.floor((lo + hi) / 2);
+      focusWordEl.style.fontSize = `${mid}px`;
+      lineEl.getBoundingClientRect();
+      if (fitsFocusWord()) {
+        best = mid;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    focusWordEl.style.fontSize = `${best}px`;
+    lineEl.getBoundingClientRect();
+    focusWordEl.style.transition = prevTransition;
+    return best;
   }
   /**
    * Displays a welcome message (no text loaded)
-   * Uses DOM API to build the message instead of innerHTML
-   *
-   * @param icon - Icon to display
-   * @param mainText - Main message text
-   * @param subText - Instruction text
    */
   displayWelcomeMessage(icon, mainText, subText) {
-    this.wordEl.empty();
-    const welcomeDiv = this.wordEl.createDiv({ cls: "dashreader-welcome-message" });
+    this.contentEl.empty();
+    this.wordEl.setAttribute("data-running", "false");
+    const welcomeDiv = this.contentEl.createDiv({ cls: "dashreader-welcome-message" });
     welcomeDiv.createDiv({
       text: `${icon} ${mainText}`,
       cls: "dashreader-welcome-icon"
@@ -1616,18 +2107,11 @@ var WordDisplay = class {
   }
   /**
    * Displays a ready message (text loaded, ready to start)
-   * Uses DOM API to build the message instead of innerHTML
-   *
-   * @param wordsToRead - Number of words to read
-   * @param totalWords - Total words in document
-   * @param startIndex - Starting word index (if resuming)
-   * @param durationText - Formatted estimated duration
-   * @param fileName - Optional source file name
-   * @param lineNumber - Optional source line number
    */
   displayReadyMessage(wordsToRead, totalWords, startIndex, durationText, fileName, lineNumber) {
-    this.wordEl.empty();
-    const readyDiv = this.wordEl.createDiv({ cls: "dashreader-ready-message" });
+    this.contentEl.empty();
+    this.wordEl.setAttribute("data-running", "false");
+    const readyDiv = this.contentEl.createDiv({ cls: "dashreader-ready-message" });
     if (fileName) {
       const sourceDiv = readyDiv.createDiv({ cls: "dashreader-ready-source" });
       sourceDiv.createSpan({ text: "\u{1F4C4} " });
@@ -1657,7 +2141,8 @@ var WordDisplay = class {
    * Clears the word display
    */
   clear() {
-    this.wordEl.empty();
+    this.contentEl.empty();
+    this.wordEl.setAttribute("data-running", "false");
   }
 };
 
@@ -1732,47 +2217,228 @@ var HotkeyHandler = class {
   }
 };
 
+// src/services/stats-formatter.ts
+var StatsFormatter = class {
+  /**
+   * Format time in seconds to MM:SS format
+   *
+   * @param seconds - Time in seconds
+   * @returns Formatted time string (MM:SS)
+   *
+   * @example
+   * ```typescript
+   * formatTime(0);    // "0:00"
+   * formatTime(45);   // "0:45"
+   * formatTime(90);   // "1:30"
+   * formatTime(3661); // "61:01"
+   * ```
+   */
+  formatTime(seconds) {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
+  }
+  /**
+   * Format reading statistics for display during reading
+   *
+   * Shows: words read/total, elapsed time, current WPM, remaining time
+   *
+   * @param stats - Reading statistics
+   * @returns Formatted stats string
+   *
+   * @example
+   * ```typescript
+   * formatReadingStats({
+   *   wordsRead: 150,
+   *   totalWords: 500,
+   *   elapsedTime: 45,
+   *   currentWpm: 200,
+   *   remainingTime: 105
+   * });
+   * // Returns: "150/500 words | 0:45 | 200 WPM | 1:45 left"
+   * ```
+   */
+  formatReadingStats(stats) {
+    const { wordsRead, totalWords, elapsedTime, currentWpm, remainingTime } = stats;
+    return [
+      `${wordsRead}/${totalWords} words`,
+      this.formatTime(elapsedTime),
+      `${currentWpm} WPM`,
+      `${this.formatTime(remainingTime)} left`
+    ].join(" | ");
+  }
+  /**
+   * Format loaded statistics for display after loading text
+   *
+   * Shows: words loaded, estimated duration, file info, instructions
+   *
+   * @param stats - Loaded statistics
+   * @returns Formatted stats string
+   *
+   * @example
+   * ```typescript
+   * // From beginning
+   * formatLoadedStats({
+   *   remainingWords: 500,
+   *   totalWords: 500,
+   *   estimatedDuration: 150
+   * });
+   * // Returns: "500 words loaded - ~2:30 - Shift+Space to start"
+   *
+   * // From cursor position
+   * formatLoadedStats({
+   *   remainingWords: 300,
+   *   totalWords: 500,
+   *   estimatedDuration: 90,
+   *   fileName: 'document.md',
+   *   startWordIndex: 200
+   * });
+   * // Returns: "300/500 words loaded from document.md - ~1:30 - Shift+Space to start"
+   * ```
+   */
+  formatLoadedStats(stats) {
+    const { remainingWords, totalWords, estimatedDuration, fileName, startWordIndex } = stats;
+    const wordInfo = startWordIndex && startWordIndex > 0 ? `${remainingWords}/${totalWords} words` : `${totalWords} words`;
+    const fileInfo = fileName ? ` from ${fileName}` : "";
+    const durationText = this.formatTime(estimatedDuration);
+    return `${wordInfo} loaded${fileInfo} - ~${durationText} - Shift+Space to start`;
+  }
+  /**
+   * Format word count for display
+   *
+   * @param wordsRead - Words read so far
+   * @param totalWords - Total words in document
+   * @returns Formatted word count string
+   *
+   * @example
+   * ```typescript
+   * formatWordCount(150, 500);  // "150/500 words"
+   * formatWordCount(0, 500);    // "0/500 words"
+   * formatWordCount(500, 500);  // "500/500 words"
+   * ```
+   */
+  formatWordCount(wordsRead, totalWords) {
+    return `${wordsRead}/${totalWords} words`;
+  }
+  /**
+   * Format WPM (words per minute) for display
+   *
+   * @param wpm - Words per minute
+   * @returns Formatted WPM string
+   *
+   * @example
+   * ```typescript
+   * formatWpm(200);  // "200 WPM"
+   * formatWpm(350);  // "350 WPM"
+   * ```
+   */
+  formatWpm(wpm) {
+    return `${wpm} WPM`;
+  }
+};
+
 // src/minimap-manager.ts
 var MinimapManager = class {
-  constructor(containerEl, engine, timeoutManager) {
+  constructor(containerEl, engine, timeoutManager, orientation = "vertical") {
+    this.positionIndicatorEl = null;
     this.currentWordIndex = 0;
     this.totalWords = 0;
     this.containerEl = containerEl;
     this.engine = engine;
     this.timeoutManager = timeoutManager;
+    this.orientation = orientation;
+    this.statsFormatter = new StatsFormatter();
     this.minimapEl = this.containerEl.createDiv({
-      cls: "dashreader-minimap"
+      cls: `dashreader-minimap dashreader-minimap-${orientation}`
     });
     this.progressEl = this.minimapEl.createDiv({
       cls: "dashreader-minimap-progress"
     });
-    this.minimapEl.createDiv({
-      cls: "dashreader-minimap-line"
-    });
+    if (orientation === "vertical") {
+      this.minimapEl.createDiv({
+        cls: "dashreader-minimap-line"
+      });
+    } else {
+      this.positionIndicatorEl = this.minimapEl.createDiv({
+        cls: "dashreader-minimap-position"
+      });
+      this.minimapEl.addEventListener("click", (e) => this.handleTimelineClick(e));
+      this.minimapEl.addEventListener("mousemove", (e) => this.handleTimelineHover(e));
+      this.minimapEl.addEventListener("mouseleave", () => this.hideTooltip());
+    }
     this.tooltipEl = document.body.createDiv({
       cls: "dashreader-minimap-tooltip"
     });
   }
   /**
-   * Render the minimap with heading points
+   * Render the minimap with heading points/sections
    * Called when text is loaded or structure changes
    */
   render() {
     if (!this.minimapEl)
       return;
-    const existingPoints = this.minimapEl.querySelectorAll(".dashreader-minimap-point");
-    existingPoints.forEach((point) => point.remove());
+    const existingElements = this.minimapEl.querySelectorAll(".dashreader-minimap-point, .dashreader-minimap-section");
+    existingElements.forEach((el) => el.remove());
     const headings = this.engine.getHeadings();
     this.totalWords = this.engine.getTotalWords();
-    if (headings.length === 0 || this.totalWords === 0) {
+    if (this.totalWords === 0) {
       this.minimapEl.toggleClass(CSS_CLASSES.hidden, true);
       return;
     }
     this.minimapEl.toggleClass(CSS_CLASSES.hidden, false);
+    if (this.orientation === "horizontal") {
+      this.renderHorizontal(headings);
+    } else {
+      this.renderVertical(headings);
+    }
+    this.updateCurrentPosition(this.currentWordIndex);
+  }
+  /**
+   * Render vertical minimap with points
+   */
+  renderVertical(headings) {
+    if (headings.length === 0)
+      return;
     headings.forEach((heading, index) => {
       this.createPoint(heading, index);
     });
-    this.updateCurrentPosition(this.currentWordIndex);
+  }
+  /**
+   * Render horizontal minimap with sections and heading labels
+   */
+  renderHorizontal(headings) {
+    const sections = [];
+    if (headings.length === 0) {
+      sections.push({ start: 0, end: this.totalWords, heading: null });
+    } else {
+      if (headings[0].wordIndex > 0) {
+        sections.push({ start: 0, end: headings[0].wordIndex, heading: null });
+      }
+      for (let i = 0; i < headings.length; i++) {
+        const start = headings[i].wordIndex;
+        const end = i < headings.length - 1 ? headings[i + 1].wordIndex : this.totalWords;
+        sections.push({ start, end, heading: headings[i] });
+      }
+    }
+    sections.forEach((section) => {
+      const sectionEl = this.minimapEl.createDiv({
+        cls: "dashreader-minimap-section"
+      });
+      const widthPercent = (section.end - section.start) / this.totalWords * 100;
+      sectionEl.style.width = `${widthPercent}%`;
+      sectionEl.setAttribute("data-start", section.start.toString());
+      sectionEl.setAttribute("data-end", section.end.toString());
+      if (section.heading) {
+        sectionEl.setAttribute("data-level", section.heading.level.toString());
+        sectionEl.setAttribute("data-heading-text", section.heading.text);
+        sectionEl.classList.add("dashreader-minimap-section-heading");
+        const labelEl = sectionEl.createDiv({
+          cls: "dashreader-minimap-section-label",
+          text: section.heading.text
+        });
+        labelEl.setAttribute("data-level", section.heading.level.toString());
+      }
+    });
   }
   /**
    * Create a point for a heading
@@ -1799,46 +2465,94 @@ var MinimapManager = class {
     });
   }
   /**
-   * Update which point is highlighted as current
+   * Update which point/section is highlighted as current
    */
   updateCurrentPosition(wordIndex) {
     this.currentWordIndex = wordIndex;
     if (!this.minimapEl)
       return;
-    if (this.progressEl && this.totalWords > 0) {
-      const progressPercentage = wordIndex / this.totalWords * 100;
-      this.progressEl.style.height = `${Math.min(100, Math.max(0, progressPercentage))}%`;
-    }
-    const headings = this.engine.getHeadings();
-    if (headings.length === 0)
-      return;
-    const relevantHeadings = headings.filter((h) => h.wordIndex <= wordIndex);
-    const currentHeading = relevantHeadings.length > 0 ? relevantHeadings[relevantHeadings.length - 1] : null;
-    const points = this.minimapEl.querySelectorAll(".dashreader-minimap-point");
-    points.forEach((point) => {
-      const pointWordIndex = parseInt(point.getAttribute("data-word-index") || "0");
-      if (currentHeading && pointWordIndex === currentHeading.wordIndex) {
-        point.classList.add("dashreader-minimap-point-current");
-      } else {
-        point.classList.remove("dashreader-minimap-point-current");
+    const progressPercentage = this.totalWords > 0 ? wordIndex / this.totalWords * 100 : 0;
+    if (this.orientation === "horizontal") {
+      if (this.progressEl) {
+        this.progressEl.style.width = `${Math.min(100, Math.max(0, progressPercentage))}%`;
       }
-    });
+      if (this.positionIndicatorEl) {
+        this.positionIndicatorEl.style.left = `${Math.min(100, Math.max(0, progressPercentage))}%`;
+      }
+      const sections = this.minimapEl.querySelectorAll(".dashreader-minimap-section");
+      sections.forEach((section) => {
+        const start = parseInt(section.getAttribute("data-start") || "0");
+        const end = parseInt(section.getAttribute("data-end") || "0");
+        if (wordIndex >= start && wordIndex < end) {
+          section.classList.add("dashreader-minimap-section-current");
+        } else {
+          section.classList.remove("dashreader-minimap-section-current");
+        }
+      });
+    } else {
+      if (this.progressEl) {
+        this.progressEl.style.height = `${Math.min(100, Math.max(0, progressPercentage))}%`;
+      }
+      const headings = this.engine.getHeadings();
+      if (headings.length === 0)
+        return;
+      const relevantHeadings = headings.filter((h) => h.wordIndex <= wordIndex);
+      const currentHeading = relevantHeadings.length > 0 ? relevantHeadings[relevantHeadings.length - 1] : null;
+      const points = this.minimapEl.querySelectorAll(".dashreader-minimap-point");
+      points.forEach((point) => {
+        const pointWordIndex = parseInt(point.getAttribute("data-word-index") || "0");
+        if (currentHeading && pointWordIndex === currentHeading.wordIndex) {
+          point.classList.add("dashreader-minimap-point-current");
+        } else {
+          point.classList.remove("dashreader-minimap-point-current");
+        }
+      });
+    }
   }
   /**
-   * Navigate to a specific heading
+   * Handle click on horizontal timeline
+   */
+  handleTimelineClick(e) {
+    if (this.totalWords === 0)
+      return;
+    const rect = this.minimapEl.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const ratio = clickX / rect.width;
+    const targetIndex = Math.floor(ratio * this.totalWords);
+    this.navigateToHeading(Math.max(0, Math.min(targetIndex, this.totalWords - 1)));
+  }
+  /**
+   * Handle hover on horizontal timeline (show tooltip with time/heading)
+   */
+  handleTimelineHover(e) {
+    if (this.totalWords === 0)
+      return;
+    const rect = this.minimapEl.getBoundingClientRect();
+    const hoverX = e.clientX - rect.left;
+    const ratio = hoverX / rect.width;
+    const hoverIndex = Math.floor(ratio * this.totalWords);
+    const timeAtIndex = this.engine.getVirtualElapsedSecondsAtIndex(hoverIndex);
+    const totalTime = this.engine.getVirtualTotalSeconds();
+    const timeText = `${this.statsFormatter.formatTime(timeAtIndex)} / ${this.statsFormatter.formatTime(totalTime)}`;
+    const headings = this.engine.getHeadings();
+    const relevantHeadings = headings.filter((h) => h.wordIndex <= hoverIndex);
+    const heading = relevantHeadings.length > 0 ? relevantHeadings[relevantHeadings.length - 1] : null;
+    let tooltipText = timeText;
+    if (heading) {
+      const cleanHeading = heading.text.replace(/^\[H\d\]/, "").replace(/^\[CALLOUT:[\w-]+\]/, "").trim();
+      tooltipText = `${cleanHeading} \u2022 ${timeText}`;
+    }
+    this.tooltipEl.textContent = tooltipText;
+    this.tooltipEl.style.left = `${e.clientX}px`;
+    this.tooltipEl.style.top = `${rect.top - 40}px`;
+    this.tooltipEl.classList.add("visible");
+  }
+  /**
+   * Navigate to a specific word index
    */
   navigateToHeading(wordIndex) {
     const wasPlaying = this.engine.getIsPlaying();
-    if (wasPlaying) {
-      this.engine.pause();
-    }
-    const currentIndex = this.engine.getCurrentIndex();
-    const delta = wordIndex - currentIndex;
-    if (delta < 0) {
-      this.engine.rewind(Math.abs(delta));
-    } else if (delta > 0) {
-      this.engine.forward(delta);
-    }
+    this.engine.goToIndex(wordIndex);
     if (wasPlaying) {
       this.timeoutManager.setTimeout(() => {
         this.engine.play();
@@ -1881,6 +2595,42 @@ var MinimapManager = class {
     if (this.minimapEl) {
       this.minimapEl.toggleClass(CSS_CLASSES.hidden, true);
     }
+  }
+  /**
+   * Setup wheel navigation on the minimap
+   * @param onForward - Callback when scrolling forward (down)
+   * @param onBackward - Callback when scrolling backward (up)
+   */
+  setupWheelNavigation(onForward, onBackward) {
+    let wheelAccum = 0;
+    let wheelDir = 0;
+    const WHEEL_THRESHOLD = 80;
+    this.minimapEl.addEventListener("wheel", (e) => {
+      if (e.ctrlKey || e.metaKey)
+        return;
+      e.preventDefault();
+      let dy = e.deltaY;
+      if (e.deltaMode === 1) {
+        dy *= 16;
+      } else if (e.deltaMode === 2) {
+        dy *= 800;
+      }
+      const dir = Math.sign(dy);
+      if (dir !== 0 && dir !== wheelDir) {
+        wheelAccum = 0;
+        wheelDir = dir;
+      }
+      wheelAccum += dy;
+      if (wheelAccum >= WHEEL_THRESHOLD) {
+        wheelAccum -= WHEEL_THRESHOLD;
+        wheelAccum = Math.min(wheelAccum, WHEEL_THRESHOLD - 1);
+        onForward();
+      } else if (wheelAccum <= -WHEEL_THRESHOLD) {
+        wheelAccum += WHEEL_THRESHOLD;
+        wheelAccum = Math.max(wheelAccum, -(WHEEL_THRESHOLD - 1));
+        onBackward();
+      }
+    }, { passive: false });
   }
   /**
    * Clean up
@@ -2018,134 +2768,26 @@ var TimeoutManager = class {
   }
 };
 
-// src/services/stats-formatter.ts
-var StatsFormatter = class {
-  /**
-   * Format time in seconds to MM:SS format
-   *
-   * @param seconds - Time in seconds
-   * @returns Formatted time string (MM:SS)
-   *
-   * @example
-   * ```typescript
-   * formatTime(0);    // "0:00"
-   * formatTime(45);   // "0:45"
-   * formatTime(90);   // "1:30"
-   * formatTime(3661); // "61:01"
-   * ```
-   */
-  formatTime(seconds) {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, "0")}`;
-  }
-  /**
-   * Format reading statistics for display during reading
-   *
-   * Shows: words read/total, elapsed time, current WPM, remaining time
-   *
-   * @param stats - Reading statistics
-   * @returns Formatted stats string
-   *
-   * @example
-   * ```typescript
-   * formatReadingStats({
-   *   wordsRead: 150,
-   *   totalWords: 500,
-   *   elapsedTime: 45,
-   *   currentWpm: 200,
-   *   remainingTime: 105
-   * });
-   * // Returns: "150/500 words | 0:45 | 200 WPM | 1:45 left"
-   * ```
-   */
-  formatReadingStats(stats) {
-    const { wordsRead, totalWords, elapsedTime, currentWpm, remainingTime } = stats;
-    return [
-      `${wordsRead}/${totalWords} words`,
-      this.formatTime(elapsedTime),
-      `${currentWpm} WPM`,
-      `${this.formatTime(remainingTime)} left`
-    ].join(" | ");
-  }
-  /**
-   * Format loaded statistics for display after loading text
-   *
-   * Shows: words loaded, estimated duration, file info, instructions
-   *
-   * @param stats - Loaded statistics
-   * @returns Formatted stats string
-   *
-   * @example
-   * ```typescript
-   * // From beginning
-   * formatLoadedStats({
-   *   remainingWords: 500,
-   *   totalWords: 500,
-   *   estimatedDuration: 150
-   * });
-   * // Returns: "500 words loaded - ~2:30 - Shift+Space to start"
-   *
-   * // From cursor position
-   * formatLoadedStats({
-   *   remainingWords: 300,
-   *   totalWords: 500,
-   *   estimatedDuration: 90,
-   *   fileName: 'document.md',
-   *   startWordIndex: 200
-   * });
-   * // Returns: "300/500 words loaded from document.md - ~1:30 - Shift+Space to start"
-   * ```
-   */
-  formatLoadedStats(stats) {
-    const { remainingWords, totalWords, estimatedDuration, fileName, startWordIndex } = stats;
-    const wordInfo = startWordIndex && startWordIndex > 0 ? `${remainingWords}/${totalWords} words` : `${totalWords} words`;
-    const fileInfo = fileName ? ` from ${fileName}` : "";
-    const durationText = this.formatTime(estimatedDuration);
-    return `${wordInfo} loaded${fileInfo} - ~${durationText} - Shift+Space to start`;
-  }
-  /**
-   * Format word count for display
-   *
-   * @param wordsRead - Words read so far
-   * @param totalWords - Total words in document
-   * @returns Formatted word count string
-   *
-   * @example
-   * ```typescript
-   * formatWordCount(150, 500);  // "150/500 words"
-   * formatWordCount(0, 500);    // "0/500 words"
-   * formatWordCount(500, 500);  // "500/500 words"
-   * ```
-   */
-  formatWordCount(wordsRead, totalWords) {
-    return `${wordsRead}/${totalWords} words`;
-  }
-  /**
-   * Format WPM (words per minute) for display
-   *
-   * @param wpm - Words per minute
-   * @returns Formatted WPM string
-   *
-   * @example
-   * ```typescript
-   * formatWpm(200);  // "200 WPM"
-   * formatWpm(350);  // "350 WPM"
-   * ```
-   */
-  formatWpm(wpm) {
-    return `${wpm} WPM`;
-  }
-};
+// src/fullscreen-modal.ts
+var import_obsidian2 = require("obsidian");
 
 // src/ui-builders.ts
+var import_obsidian = require("obsidian");
 function createButton(parent, config) {
   const className = config.className ? `${CSS_CLASSES.btn} ${config.className}` : CSS_CLASSES.btn;
   const btn = parent.createEl("button", {
-    text: config.icon,
     cls: className,
-    attr: { title: config.title }
+    attr: {
+      title: config.title,
+      "aria-label": config.title,
+      type: "button"
+    }
   });
+  if (config.icon.startsWith("lucide:")) {
+    (0, import_obsidian.setIcon)(btn, config.icon.slice("lucide:".length));
+  } else {
+    btn.setText(config.icon);
+  }
   btn.addEventListener("click", config.onClick);
   return btn;
 }
@@ -2204,12 +2846,669 @@ function createPlayPauseButtons(parent, onPlay, onPause, registry) {
   registry.register("pauseBtn", pauseBtn);
 }
 function updatePlayPauseButtons(registry, isPlaying) {
-  registry.toggleClass("playBtn", CSS_CLASSES.hidden, isPlaying);
-  registry.toggleClass("pauseBtn", CSS_CLASSES.hidden, !isPlaying);
+  if (isPlaying) {
+    registry.addClass("playBtn", CSS_CLASSES.hidden);
+    registry.removeClass("pauseBtn", CSS_CLASSES.hidden);
+  } else {
+    registry.removeClass("playBtn", CSS_CLASSES.hidden);
+    registry.addClass("pauseBtn", CSS_CLASSES.hidden);
+  }
 }
 
+// src/fullscreen-modal.ts
+var FullscreenModal = class extends import_obsidian2.Modal {
+  constructor(app, engine, settings, onModalClose, timeoutManager) {
+    super(app);
+    this.originalOnWordChange = null;
+    this.originalOnComplete = null;
+    /**
+     * Sets up wheel/trackpad navigation for word-by-word scrubbing
+     * Based on fork implementation for smooth, responsive scrolling
+     * Only works when paused
+     */
+    // Timer for resuming after scroll navigation
+    this.scrollResumeTimerId = null;
+    this.SCROLL_RESUME_DELAY = 800;
+    // ms before resuming after scroll
+    // Timer for updating stats display every second during playback
+    this.statsIntervalId = null;
+    this.STATS_UPDATE_INTERVAL = 1e3;
+    this.engine = engine;
+    this.settings = settings;
+    this.onModalClose = onModalClose;
+    this.timeoutManager = timeoutManager;
+    this.wasPlayingOnOpen = engine.getIsPlaying();
+    this.statsFormatter = new StatsFormatter();
+    this.dom = new DOMRegistry();
+  }
+  onOpen() {
+    this.originalOnWordChange = this.engine.getOnWordChangeCallback();
+    this.originalOnComplete = this.engine.getOnCompleteCallback();
+    this.modalEl.addClass("dashreader-fullscreen-modal");
+    this.containerEl.addClass("dashreader-fullscreen-backdrop");
+    this.buildFullscreenUI();
+    this.wordDisplay = new WordDisplay(this.wordEl, this.settings, this.displayArea);
+    const fullscreenFontSize = this.engine.getEffectiveFontSize() * 2;
+    this.wordDisplay.setBaseFontSize(fullscreenFontSize);
+    this.breadcrumbManager = new BreadcrumbManager(
+      this.breadcrumbEl,
+      this.engine,
+      this.timeoutManager
+    );
+    this.hotkeyHandler = new HotkeyHandler(this.settings, {
+      onTogglePlay: () => this.togglePlay(),
+      onRewind: () => this.engine.rewind(),
+      onForward: () => this.engine.forward(),
+      onIncrementWpm: () => this.changeWpm(10),
+      onDecrementWpm: () => this.changeWpm(-10),
+      onQuit: () => this.close()
+    });
+    this.engine.setCallbacks(
+      this.onWordChange.bind(this),
+      this.onComplete.bind(this)
+    );
+    this.setupKeyboardEvents();
+    this.setupWheelNavigation();
+    this.displayCurrentState();
+    const currentIndex = this.engine.getCurrentIndex();
+    const context = this.engine.getCurrentHeadingContext(currentIndex);
+    if (context.breadcrumb.length > 0) {
+      this.breadcrumbManager.updateBreadcrumb(context);
+    }
+    if (this.wasPlayingOnOpen && !this.engine.getIsPlaying()) {
+      this.engine.play();
+    }
+    if (this.engine.getIsPlaying()) {
+      this.startStatsTimer();
+    }
+    this.updatePlayPauseIcon();
+  }
+  onClose() {
+    var _a, _b;
+    if (this.scrollResumeTimerId) {
+      clearTimeout(this.scrollResumeTimerId);
+      this.scrollResumeTimerId = null;
+    }
+    this.stopStatsTimer();
+    if (this.engine.getIsPlaying()) {
+      this.engine.pause();
+    }
+    if (this.originalOnWordChange || this.originalOnComplete) {
+      this.engine.setCallbacks(
+        (_a = this.originalOnWordChange) != null ? _a : () => {
+        },
+        (_b = this.originalOnComplete) != null ? _b : () => {
+        }
+      );
+    }
+    if (this.minimapManager) {
+      this.minimapManager.destroy();
+    }
+    this.dom.clear();
+    this.onModalClose();
+  }
+  /**
+   * Builds the fullscreen UI layout
+   */
+  buildFullscreenUI() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.addClass("dashreader-fullscreen-content");
+    const settingsBtn = contentEl.createDiv({ cls: "dashreader-fullscreen-settings-btn" });
+    (0, import_obsidian2.setIcon)(settingsBtn, "settings");
+    settingsBtn.setAttribute("aria-label", "Settings");
+    settingsBtn.addEventListener("click", () => this.toggleSettingsPanel());
+    this.breadcrumbEl = contentEl.createDiv({
+      cls: "dashreader-breadcrumb dashreader-fullscreen-breadcrumb"
+    });
+    this.displayArea = contentEl.createDiv({ cls: "dashreader-fullscreen-display" });
+    this.wordEl = this.displayArea.createDiv({ cls: "dashreader-fullscreen-word" });
+    const fullscreenInitFontSize = this.engine.getEffectiveFontSize() * 2;
+    this.wordEl.style.fontSize = `${fullscreenInitFontSize}px`;
+    this.wordEl.style.fontFamily = this.settings.fontFamily;
+    this.wordEl.style.color = this.settings.fontColor;
+    this.dom.register("wordEl", this.wordEl);
+    if (this.settings.showFocusBars) {
+      this.wordEl.addClass("dashreader-focus-enabled");
+    }
+    this.statsEl = contentEl.createDiv({ cls: "dashreader-fullscreen-stats-row" });
+    this.statsLeftEl = this.statsEl.createDiv({ cls: "dashreader-fullscreen-stats-left" });
+    this.statsRightEl = this.statsEl.createDiv({ cls: "dashreader-fullscreen-stats-right" });
+    this.dom.register("statsLeftEl", this.statsLeftEl);
+    this.dom.register("statsRightEl", this.statsRightEl);
+    this.minimapContainer = contentEl.createDiv({
+      cls: "dashreader-fullscreen-minimap-container"
+    });
+    this.minimapManager = new MinimapManager(
+      this.minimapContainer,
+      this.engine,
+      this.timeoutManager,
+      "horizontal"
+    );
+    this.minimapManager.render();
+    this.setupMinimapInteraction();
+    this.controlsEl = contentEl.createDiv({ cls: "dashreader-fullscreen-controls" });
+    this.buildControls();
+  }
+  /**
+   * Builds playback controls and settings panel
+   */
+  buildControls() {
+    const controlGroup = this.controlsEl.createDiv({ cls: CSS_CLASSES.controlGroup });
+    createButton(controlGroup, {
+      icon: ICONS.arrowLeft,
+      title: "Previous heading (\u2190)",
+      onClick: () => this.jumpHeading("up"),
+      className: CSS_CLASSES.toggleBtn
+    });
+    const playPauseBtn = controlGroup.createEl("button", {
+      cls: `${CSS_CLASSES.btn} ${CSS_CLASSES.toggleBtn}`,
+      attr: {
+        title: "Play/Pause (Shift+Space)",
+        "aria-label": "Play/Pause",
+        type: "button"
+      }
+    });
+    (0, import_obsidian2.setIcon)(playPauseBtn, this.engine.getIsPlaying() ? "pause" : "play");
+    playPauseBtn.addEventListener("click", () => this.togglePlay());
+    this.dom.register("playPauseBtn", playPauseBtn);
+    createButton(controlGroup, {
+      icon: ICONS.arrowRight,
+      title: "Next heading (\u2192)",
+      onClick: () => this.jumpHeading("down"),
+      className: CSS_CLASSES.toggleBtn
+    });
+    const settingsPanel = this.controlsEl.createDiv({
+      cls: `dashreader-fullscreen-settings ${CSS_CLASSES.hidden}`
+    });
+    this.dom.register("settingsPanel", settingsPanel);
+    createNumberControl(
+      settingsPanel,
+      {
+        label: "WPM: ",
+        value: this.engine.getWpm(),
+        onIncrement: () => this.changeWpm(25),
+        onDecrement: () => this.changeWpm(-25),
+        registryKey: "wpmValue",
+        decrementTitle: "Slower (-25)",
+        incrementTitle: "Faster (+25)"
+      },
+      this.dom
+    );
+    createNumberControl(
+      settingsPanel,
+      {
+        label: "Font: ",
+        value: Math.round(this.engine.getEffectiveFontSize() * 2),
+        onIncrement: () => this.changeFontSize(4),
+        onDecrement: () => this.changeFontSize(-4),
+        registryKey: "fontValue",
+        decrementTitle: "Smaller",
+        incrementTitle: "Larger"
+      },
+      this.dom
+    );
+    const togglesRow = settingsPanel.createDiv({ cls: "dashreader-fullscreen-toggles" });
+    createToggleControl(togglesRow, {
+      label: "Slow start",
+      checked: this.settings.enableSlowStart,
+      onChange: (checked) => {
+        this.settings.enableSlowStart = checked;
+        this.engine.updateSettings(this.settings);
+      }
+    });
+    createToggleControl(togglesRow, {
+      label: "Micropause",
+      checked: this.settings.enableMicropause,
+      onChange: (checked) => {
+        this.settings.enableMicropause = checked;
+        this.engine.updateSettings(this.settings);
+      }
+    });
+    createToggleControl(togglesRow, {
+      label: "Focus bars",
+      checked: this.settings.showFocusBars,
+      onChange: (checked) => {
+        this.settings.showFocusBars = checked;
+        this.toggleFocusBarsDisplay();
+      }
+    });
+  }
+  /**
+   * Toggles settings panel visibility
+   */
+  toggleSettingsPanel() {
+    const panel = this.dom.get("settingsPanel");
+    if (panel) {
+      panel.toggleClass(CSS_CLASSES.hidden, !panel.hasClass(CSS_CLASSES.hidden));
+    }
+  }
+  /**
+   * Changes font size by delta
+   */
+  changeFontSize(delta) {
+    const currentSize = parseFloat(this.wordEl.style.fontSize) || this.engine.getEffectiveFontSize() * 2;
+    const newSize = Math.max(24, Math.min(200, currentSize + delta));
+    this.wordEl.style.fontSize = `${newSize}px`;
+    this.dom.updateText("fontValue", String(Math.round(newSize)));
+  }
+  /**
+   * Toggles focus bars visibility
+   */
+  toggleFocusBarsDisplay() {
+    this.wordEl.toggleClass("dashreader-focus-enabled", this.settings.showFocusBars);
+  }
+  /**
+   * Sets up keyboard event handling
+   */
+  setupKeyboardEvents() {
+    this.contentEl.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        this.close();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === "ArrowLeft") {
+        e.preventDefault();
+        this.engine.goToIndex(0);
+        this.updateAfterNavigation();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === "ArrowRight") {
+        e.preventDefault();
+        this.engine.goToIndex(this.engine.getTotalWords() - 1);
+        this.updateAfterNavigation();
+        return;
+      }
+      if (e.key === "ArrowUp" || e.key === "ArrowLeft") {
+        e.preventDefault();
+        this.jumpHeading("up");
+        return;
+      }
+      if (e.key === "ArrowDown" || e.key === "ArrowRight") {
+        e.preventDefault();
+        this.jumpHeading("down");
+        return;
+      }
+      this.hotkeyHandler.handleKeyPress(e);
+    });
+    this.contentEl.setAttribute("tabindex", "0");
+    this.contentEl.focus();
+  }
+  /**
+   * Displays the current reading state
+   */
+  displayCurrentState() {
+    const currentIndex = this.engine.getCurrentIndex();
+    const totalWords = this.engine.getTotalWords();
+    if (currentIndex > 0 && currentIndex < totalWords) {
+      const words = this.engine.getWords();
+      if (words[currentIndex]) {
+        this.displayWord(words[currentIndex]);
+      }
+    } else {
+      const remainingWords = this.engine.getRemainingWords();
+      const durationText = this.statsFormatter.formatTime(
+        this.engine.getEstimatedDuration()
+      );
+      this.wordDisplay.displayReadyMessage(
+        remainingWords,
+        totalWords,
+        currentIndex > 0 ? currentIndex : void 0,
+        durationText
+      );
+    }
+    this.updateProgress();
+    this.updateStats();
+  }
+  /**
+   * Engine callback: word changed
+   */
+  onWordChange(chunk) {
+    this.displayWord(chunk.text);
+    if (chunk.headingContext && this.breadcrumbManager) {
+      if (this.breadcrumbManager.hasHeadingContextChanged(chunk.headingContext)) {
+        this.breadcrumbManager.updateBreadcrumb(chunk.headingContext);
+      }
+    }
+    this.updateProgress();
+    this.updateStats();
+  }
+  /**
+   * Displays a word with heading/callout detection
+   */
+  displayWord(text) {
+    const headingMatch = text.match(/^\[H(\d)\]/);
+    const calloutMatch = text.match(/^\[CALLOUT:([\w-]+)\]/);
+    let displayText = text;
+    let headingLevel = 0;
+    let showSeparator = false;
+    let calloutType;
+    if (headingMatch) {
+      headingLevel = parseInt(headingMatch[1]);
+      displayText = text.replace(/^\[H\d\]/, "");
+      showSeparator = true;
+    } else if (calloutMatch) {
+      calloutType = calloutMatch[1];
+      displayText = text.replace(/^\[CALLOUT:[\w-]+\]/, "");
+      showSeparator = true;
+    }
+    this.wordDisplay.displayWord(displayText, headingLevel, showSeparator, calloutType);
+  }
+  /**
+   * Engine callback: reading complete
+   */
+  onComplete() {
+    this.updatePlayPauseIcon();
+    this.statsEl.setText("Reading complete! \u{1F389}");
+  }
+  /**
+   * Updates the minimap position
+   */
+  updateProgress() {
+    const currentIndex = this.engine.getCurrentIndex();
+    this.minimapManager.updateCurrentPosition(currentIndex);
+  }
+  /**
+   * Updates the stats display with split layout (words left, time right)
+   */
+  updateStats() {
+    const currentIndex = this.engine.getCurrentIndex();
+    const totalWords = this.engine.getTotalWords();
+    this.statsLeftEl.setText(`${currentIndex}/${totalWords}`);
+    const isPlaying = this.engine.getIsPlaying();
+    const realElapsed = this.engine.getElapsedTime();
+    const elapsedTime = isPlaying && realElapsed > 0 ? realElapsed : this.engine.getEstimatedTimeAtCurrentPosition();
+    const totalEstimate = this.engine.getTotalEstimatedDuration();
+    const elapsedText = this.statsFormatter.formatTime(elapsedTime);
+    const totalText = this.statsFormatter.formatTime(totalEstimate);
+    this.statsRightEl.setText(`${elapsedText}/${totalText}`);
+  }
+  /**
+   * Sets up click/drag interaction on the minimap for scrubbing when paused
+   */
+  setupMinimapInteraction() {
+    let isDragging = false;
+    const seekToPosition = (e) => {
+      const rect = this.minimapContainer.getBoundingClientRect();
+      const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+      const ratio = x / rect.width;
+      const targetIndex = Math.floor(ratio * this.engine.getTotalWords());
+      this.engine.goToIndex(targetIndex);
+      this.updateProgress();
+      this.updateStats();
+      const words = this.engine.getWords();
+      if (words[targetIndex]) {
+        this.displayWord(words[targetIndex]);
+      }
+      const context = this.engine.getCurrentHeadingContext(targetIndex);
+      if (context.breadcrumb.length > 0 && this.breadcrumbManager) {
+        this.breadcrumbManager.updateBreadcrumb(context);
+      }
+    };
+    this.minimapContainer.addEventListener("mousedown", (e) => {
+      if (this.engine.getIsPlaying())
+        return;
+      isDragging = true;
+      seekToPosition(e);
+      this.minimapContainer.addClass("scrubbing");
+    });
+    document.addEventListener("mousemove", (e) => {
+      if (!isDragging)
+        return;
+      seekToPosition(e);
+    });
+    document.addEventListener("mouseup", () => {
+      if (isDragging) {
+        isDragging = false;
+        this.minimapContainer.removeClass("scrubbing");
+      }
+    });
+    this.minimapContainer.addEventListener("click", (e) => {
+      if (this.engine.getIsPlaying())
+        return;
+      seekToPosition(e);
+    });
+    let wheelAccum = 0;
+    let wheelDir = 0;
+    let wasPlayingBeforeScroll = false;
+    const WHEEL_THRESHOLD = 80;
+    this.minimapContainer.addEventListener("wheel", (e) => {
+      if (e.ctrlKey || e.metaKey)
+        return;
+      e.preventDefault();
+      let dy = e.deltaY;
+      if (e.deltaMode === 1) {
+        dy *= 16;
+      } else if (e.deltaMode === 2) {
+        dy *= 800;
+      }
+      const dir = Math.sign(dy);
+      if (dir !== 0 && dir !== wheelDir) {
+        wheelAccum = 0;
+        wheelDir = dir;
+      }
+      wheelAccum += dy;
+      if (wheelAccum >= WHEEL_THRESHOLD) {
+        wheelAccum -= WHEEL_THRESHOLD;
+        wheelAccum = Math.min(wheelAccum, WHEEL_THRESHOLD - 1);
+        if (this.engine.getIsPlaying()) {
+          wasPlayingBeforeScroll = true;
+          this.engine.pause();
+          this.updatePlayPauseIcon();
+        }
+        this.engine.forward(1);
+        this.updateAfterNavigation();
+        this.scheduleResumeAfterScroll(wasPlayingBeforeScroll, () => {
+          wasPlayingBeforeScroll = false;
+        });
+      } else if (wheelAccum <= -WHEEL_THRESHOLD) {
+        wheelAccum += WHEEL_THRESHOLD;
+        wheelAccum = Math.max(wheelAccum, -(WHEEL_THRESHOLD - 1));
+        if (this.engine.getIsPlaying()) {
+          wasPlayingBeforeScroll = true;
+          this.engine.pause();
+          this.updatePlayPauseIcon();
+        }
+        this.engine.rewind(1);
+        this.updateAfterNavigation();
+        this.scheduleResumeAfterScroll(wasPlayingBeforeScroll, () => {
+          wasPlayingBeforeScroll = false;
+        });
+      }
+    }, { passive: false });
+  }
+  // ms between stats updates
+  setupWheelNavigation() {
+    let wheelAccum = 0;
+    let wheelDir = 0;
+    let wasPlayingBeforeScroll = false;
+    const WHEEL_THRESHOLD = 80;
+    this.contentEl.addEventListener("wheel", (e) => {
+      if (e.ctrlKey || e.metaKey)
+        return;
+      const target = e.target;
+      if (target == null ? void 0 : target.closest("button, a, input, textarea, select"))
+        return;
+      e.preventDefault();
+      let dy = e.deltaY;
+      if (e.deltaMode === 1) {
+        dy *= 16;
+      } else if (e.deltaMode === 2) {
+        dy *= 800;
+      }
+      const dir = Math.sign(dy);
+      if (dir !== 0 && dir !== wheelDir) {
+        wheelAccum = 0;
+        wheelDir = dir;
+      }
+      wheelAccum += dy;
+      if (wheelAccum >= WHEEL_THRESHOLD) {
+        wheelAccum -= WHEEL_THRESHOLD;
+        wheelAccum = Math.min(wheelAccum, WHEEL_THRESHOLD - 1);
+        if (this.engine.getIsPlaying()) {
+          wasPlayingBeforeScroll = true;
+          this.engine.pause();
+          this.updatePlayPauseIcon();
+        }
+        this.engine.forward(1);
+        this.updateAfterNavigation();
+        this.scheduleResumeAfterScroll(wasPlayingBeforeScroll, () => {
+          wasPlayingBeforeScroll = false;
+        });
+      } else if (wheelAccum <= -WHEEL_THRESHOLD) {
+        wheelAccum += WHEEL_THRESHOLD;
+        wheelAccum = Math.max(wheelAccum, -(WHEEL_THRESHOLD - 1));
+        if (this.engine.getIsPlaying()) {
+          wasPlayingBeforeScroll = true;
+          this.engine.pause();
+          this.updatePlayPauseIcon();
+        }
+        this.engine.rewind(1);
+        this.updateAfterNavigation();
+        this.scheduleResumeAfterScroll(wasPlayingBeforeScroll, () => {
+          wasPlayingBeforeScroll = false;
+        });
+      }
+    }, { passive: false, capture: true });
+  }
+  /**
+   * Updates display after time-based navigation
+   */
+  updateAfterNavigation() {
+    const currentIndex = this.engine.getCurrentIndex();
+    this.updateProgress();
+    this.updateStats();
+    const words = this.engine.getWords();
+    if (words[currentIndex]) {
+      this.displayWord(words[currentIndex]);
+    }
+    const context = this.engine.getCurrentHeadingContext(currentIndex);
+    if (context.breadcrumb.length > 0 && this.breadcrumbManager) {
+      this.breadcrumbManager.updateBreadcrumb(context);
+    }
+  }
+  /**
+   * Schedules resuming playback after scroll navigation
+   * Uses debounce - resets timer on each scroll
+   */
+  scheduleResumeAfterScroll(wasPlaying, resetCallback) {
+    if (this.scrollResumeTimerId) {
+      clearTimeout(this.scrollResumeTimerId);
+      this.scrollResumeTimerId = null;
+    }
+    if (!wasPlaying)
+      return;
+    this.scrollResumeTimerId = setTimeout(() => {
+      this.scrollResumeTimerId = null;
+      resetCallback();
+      this.engine.play();
+      this.startStatsTimer();
+      this.updatePlayPauseIcon();
+    }, this.SCROLL_RESUME_DELAY);
+  }
+  /**
+   * Starts the stats update timer for linear time display during playback
+   */
+  startStatsTimer() {
+    if (this.statsIntervalId)
+      return;
+    this.statsIntervalId = setInterval(() => {
+      if (this.engine.getIsPlaying()) {
+        this.updateStats();
+      } else {
+        this.stopStatsTimer();
+      }
+    }, this.STATS_UPDATE_INTERVAL);
+  }
+  /**
+   * Stops the stats update timer
+   */
+  stopStatsTimer() {
+    if (this.statsIntervalId) {
+      clearInterval(this.statsIntervalId);
+      this.statsIntervalId = null;
+    }
+  }
+  /**
+   * Toggles play/pause state
+   */
+  togglePlay() {
+    const btn = this.dom.get("playPauseBtn");
+    if (this.engine.getIsPlaying()) {
+      this.engine.pause();
+      this.stopStatsTimer();
+      if (btn)
+        (0, import_obsidian2.setIcon)(btn, "play");
+    } else {
+      this.engine.play();
+      this.startStatsTimer();
+      if (btn)
+        (0, import_obsidian2.setIcon)(btn, "pause");
+    }
+  }
+  /**
+   * Updates the play/pause button icon based on engine state
+   * @param forceState - Optional: force icon to specific state ('play' or 'pause')
+   */
+  updatePlayPauseIcon(forceState) {
+    const btn = this.dom.get("playPauseBtn");
+    if (btn) {
+      const icon = forceState != null ? forceState : this.engine.getIsPlaying() ? "pause" : "play";
+      (0, import_obsidian2.setIcon)(btn, icon);
+    }
+  }
+  /**
+   * Changes WPM by delta
+   */
+  changeWpm(delta) {
+    const newWpm = Math.max(50, Math.min(5e3, this.engine.getWpm() + delta));
+    this.engine.setWpm(newWpm);
+    this.dom.updateText("wpmValue", String(newWpm));
+    this.updateStats();
+  }
+  /**
+   * Jumps to the previous or next heading
+   * @param direction - 'up' for previous, 'down' for next
+   */
+  jumpHeading(direction) {
+    const headings = this.engine.getHeadings();
+    if (headings.length === 0)
+      return;
+    const currentIndex = this.engine.getCurrentIndex();
+    let targetHeading;
+    if (direction === "up") {
+      for (let i = headings.length - 1; i >= 0; i--) {
+        if (headings[i].wordIndex < currentIndex) {
+          targetHeading = headings[i];
+          break;
+        }
+      }
+      if (!targetHeading) {
+        this.engine.goToIndex(0);
+        this.updateAfterNavigation();
+        return;
+      }
+    } else {
+      for (const heading of headings) {
+        if (heading.wordIndex > currentIndex) {
+          targetHeading = heading;
+          break;
+        }
+      }
+      if (!targetHeading) {
+        this.engine.goToIndex(this.engine.getTotalWords() - 1);
+        this.updateAfterNavigation();
+        return;
+      }
+    }
+    this.engine.goToIndex(targetHeading.wordIndex);
+    this.updateAfterNavigation();
+  }
+};
+
 // src/auto-load-manager.ts
-var import_obsidian = require("obsidian");
+var import_obsidian3 = require("obsidian");
 function isNavigationKey(evt) {
   return (
     // Arrow keys
@@ -2224,7 +3523,7 @@ function isSelectionKey(evt) {
   return evt.shiftKey || evt.key === "a" && (evt.metaKey || evt.ctrlKey);
 }
 function extractEditorContent(app) {
-  const activeView = app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
+  const activeView = app.workspace.getActiveViewOfType(import_obsidian3.MarkdownView);
   if (!activeView) {
     return { activeView: null, currentFile: null };
   }
@@ -2476,7 +3775,7 @@ var AutoLoadManager = class {
 
 // src/rsvp-view.ts
 var VIEW_TYPE_DASHREADER = "dashreader-view";
-var DashReaderView = class extends import_obsidian2.ItemView {
+var DashReaderView = class extends import_obsidian4.ItemView {
   // ──────────────────────────────────────────────────────────────────────
   // Constructor
   // ──────────────────────────────────────────────────────────────────────
@@ -2488,6 +3787,11 @@ var DashReaderView = class extends import_obsidian2.ItemView {
    */
   constructor(leaf, settings) {
     super(leaf);
+    /** Currently open fullscreen modal (null if none) */
+    this.fullscreenModal = null;
+    // Timer for resuming after scroll navigation
+    this.scrollResumeTimerId = null;
+    this.SCROLL_RESUME_DELAY = 800;
     this.settings = settings;
     this.state = new ViewState({
       currentWpm: settings.wpm,
@@ -2512,6 +3816,21 @@ var DashReaderView = class extends import_obsidian2.ItemView {
       },
       this.timeoutManager
     );
+  }
+  // ──────────────────────────────────────────────────────────────────────
+  // Mobile Detection
+  // ──────────────────────────────────────────────────────────────────────
+  /**
+   * Detects if running on a mobile device (iOS/Android)
+   * Uses Obsidian's Platform API with fallback to media query
+   * @returns true if on mobile device
+   */
+  isMobileUI() {
+    var _a, _b, _c;
+    if (import_obsidian4.Platform.isMobileApp || import_obsidian4.Platform.isMobile) {
+      return true;
+    }
+    return (_c = (_b = (_a = window.matchMedia) == null ? void 0 : _a.call(window, "(hover: none) and (pointer: coarse)")) == null ? void 0 : _b.matches) != null ? _c : false;
   }
   // ──────────────────────────────────────────────────────────────────────
   // Obsidian View Lifecycle
@@ -2543,10 +3862,13 @@ var DashReaderView = class extends import_obsidian2.ItemView {
    */
   async onOpen() {
     await Promise.resolve();
+    const isMobile = this.isMobileUI();
+    this.engine.setUseMobileProfile(isMobile);
     this.mainContainerEl = this.contentEl.createDiv({ cls: CSS_CLASSES.container });
     this.buildUI();
     this.breadcrumbManager = new BreadcrumbManager(this.breadcrumbEl, this.engine, this.timeoutManager);
-    this.wordDisplay = new WordDisplay(this.wordEl, this.settings);
+    const displayArea = this.dom.get("displayArea");
+    this.wordDisplay = new WordDisplay(this.wordEl, this.settings, displayArea || void 0);
     this.hotkeyHandler = new HotkeyHandler(this.settings, {
       onTogglePlay: () => this.togglePlay(),
       onRewind: () => this.engine.rewind(),
@@ -2556,6 +3878,7 @@ var DashReaderView = class extends import_obsidian2.ItemView {
       onQuit: () => this.engine.stop()
     });
     this.minimapManager = new MinimapManager(this.mainContainerEl, this.engine, this.timeoutManager);
+    this.setupMinimapWheelNavigation();
     this.wordDisplay.displayWelcomeMessage(
       ICONS.book,
       "Select text to start reading",
@@ -2617,8 +3940,8 @@ var DashReaderView = class extends import_obsidian2.ItemView {
     });
     createButton(this.toggleBar, {
       icon: ICONS.expand,
-      title: "Open in new tab",
-      onClick: () => void this.openInNewTab(),
+      title: "Fullscreen mode (F)",
+      onClick: () => this.openFullscreen(),
       className: CSS_CLASSES.toggleBtn
     });
   }
@@ -2654,19 +3977,169 @@ var DashReaderView = class extends import_obsidian2.ItemView {
    */
   buildDisplayArea() {
     const displayArea = this.mainContainerEl.createDiv({ cls: CSS_CLASSES.display });
+    this.dom.register("displayArea", displayArea);
     if (this.settings.showContext) {
       this.contextBeforeEl = displayArea.createDiv({ cls: CSS_CLASSES.contextBefore });
       this.dom.register("contextBeforeEl", this.contextBeforeEl);
     }
     this.wordEl = displayArea.createDiv({ cls: CSS_CLASSES.word });
-    this.wordEl.style.fontSize = `${this.settings.fontSize}px`;
+    this.wordEl.style.fontSize = `${this.engine.getEffectiveFontSize()}px`;
     this.wordEl.style.fontFamily = this.settings.fontFamily;
     this.wordEl.style.color = this.settings.fontColor;
     this.dom.register("wordEl", this.wordEl);
+    if (this.settings.showFocusBars) {
+      this.wordEl.addClass("dashreader-focus-enabled");
+    }
     if (this.settings.showContext) {
       this.contextAfterEl = displayArea.createDiv({ cls: CSS_CLASSES.contextAfter });
       this.dom.register("contextAfterEl", this.contextAfterEl);
     }
+    this.setupWheelNavigation(displayArea);
+  }
+  /**
+   * Sets up wheel/trackpad navigation for word-by-word scrubbing
+   * Based on fork implementation for smooth, responsive scrolling
+   * Only works when paused
+   */
+  setupWheelNavigation(displayArea) {
+    let wheelAccum = 0;
+    let wheelDir = 0;
+    let wasPlayingBeforeScroll = false;
+    const WHEEL_THRESHOLD = 80;
+    displayArea.addEventListener("wheel", (e) => {
+      if (e.ctrlKey || e.metaKey)
+        return;
+      const target = e.target;
+      if (target == null ? void 0 : target.closest("button, a, input, textarea, select"))
+        return;
+      e.preventDefault();
+      let dy = e.deltaY;
+      if (e.deltaMode === 1) {
+        dy *= 16;
+      } else if (e.deltaMode === 2) {
+        dy *= 800;
+      }
+      const dir = Math.sign(dy);
+      if (dir !== 0 && dir !== wheelDir) {
+        wheelAccum = 0;
+        wheelDir = dir;
+      }
+      wheelAccum += dy;
+      if (wheelAccum >= WHEEL_THRESHOLD) {
+        wheelAccum -= WHEEL_THRESHOLD;
+        wheelAccum = Math.min(wheelAccum, WHEEL_THRESHOLD - 1);
+        if (this.engine.getIsPlaying()) {
+          wasPlayingBeforeScroll = true;
+          this.engine.pause();
+          updatePlayPauseButtons(this.dom, false);
+        }
+        this.engine.forward(1);
+        this.updateAfterWheelNavigation();
+        this.scheduleResumeAfterScroll(wasPlayingBeforeScroll, () => {
+          wasPlayingBeforeScroll = false;
+        });
+      } else if (wheelAccum <= -WHEEL_THRESHOLD) {
+        wheelAccum += WHEEL_THRESHOLD;
+        wheelAccum = Math.max(wheelAccum, -(WHEEL_THRESHOLD - 1));
+        if (this.engine.getIsPlaying()) {
+          wasPlayingBeforeScroll = true;
+          this.engine.pause();
+          updatePlayPauseButtons(this.dom, false);
+        }
+        this.engine.rewind(1);
+        this.updateAfterWheelNavigation();
+        this.scheduleResumeAfterScroll(wasPlayingBeforeScroll, () => {
+          wasPlayingBeforeScroll = false;
+        });
+      }
+    }, { passive: false, capture: true });
+  }
+  /**
+   * Updates display after wheel navigation
+   */
+  updateAfterWheelNavigation() {
+    const currentIndex = this.engine.getCurrentIndex();
+    const words = this.engine.getWords();
+    if (this.minimapManager) {
+      this.minimapManager.updateCurrentPosition(currentIndex);
+    }
+    const progress = this.engine.getProgress();
+    this.dom.updateStyle("progressBar", "width", `${progress}%`);
+    this.updateStats();
+    if (words[currentIndex]) {
+      const word = words[currentIndex];
+      const headingMatch = word.match(/^\[H(\d)\]/);
+      const calloutMatch = word.match(/^\[CALLOUT:([\w-]+)\]/);
+      let displayText = word;
+      let headingLevel = 0;
+      let calloutType;
+      if (headingMatch) {
+        headingLevel = parseInt(headingMatch[1]);
+        displayText = word.replace(/^\[H\d\]/, "");
+      } else if (calloutMatch) {
+        calloutType = calloutMatch[1];
+        displayText = word.replace(/^\[CALLOUT:[\w-]+\]/, "");
+      }
+      this.wordDisplay.displayWord(displayText, headingLevel, false, calloutType);
+      const context = this.engine.getCurrentHeadingContext(currentIndex);
+      if (context.breadcrumb.length > 0 && this.breadcrumbManager) {
+        this.breadcrumbManager.updateBreadcrumb(context);
+      }
+    }
+  }
+  // ms before resuming after scroll
+  /**
+   * Sets up wheel navigation on the minimap
+   * Uses the same pause/resume logic as the main display area
+   */
+  setupMinimapWheelNavigation() {
+    let wasPlayingBeforeScroll = false;
+    this.minimapManager.setupWheelNavigation(
+      // On forward (scroll down)
+      () => {
+        if (this.engine.getIsPlaying()) {
+          wasPlayingBeforeScroll = true;
+          this.engine.pause();
+          updatePlayPauseButtons(this.dom, false);
+        }
+        this.engine.forward(1);
+        this.updateAfterWheelNavigation();
+        this.scheduleResumeAfterScroll(wasPlayingBeforeScroll, () => {
+          wasPlayingBeforeScroll = false;
+        });
+      },
+      // On backward (scroll up)
+      () => {
+        if (this.engine.getIsPlaying()) {
+          wasPlayingBeforeScroll = true;
+          this.engine.pause();
+          updatePlayPauseButtons(this.dom, false);
+        }
+        this.engine.rewind(1);
+        this.updateAfterWheelNavigation();
+        this.scheduleResumeAfterScroll(wasPlayingBeforeScroll, () => {
+          wasPlayingBeforeScroll = false;
+        });
+      }
+    );
+  }
+  /**
+   * Schedules resuming playback after scroll navigation
+   * Uses debounce - resets timer on each scroll
+   */
+  scheduleResumeAfterScroll(wasPlaying, resetCallback) {
+    if (this.scrollResumeTimerId) {
+      clearTimeout(this.scrollResumeTimerId);
+      this.scrollResumeTimerId = null;
+    }
+    if (!wasPlaying)
+      return;
+    this.scrollResumeTimerId = setTimeout(() => {
+      this.scrollResumeTimerId = null;
+      resetCallback();
+      this.engine.play();
+      updatePlayPauseButtons(this.dom, true);
+    }, this.SCROLL_RESUME_DELAY);
   }
   /**
    * Builds the progress bar at the bottom of display
@@ -2804,6 +4277,23 @@ var DashReaderView = class extends import_obsidian2.ItemView {
         this.engine.updateSettings(this.settings);
       }
     });
+    createToggleControl(this.settingsEl, {
+      label: "Focus bars",
+      checked: this.settings.showFocusBars,
+      onChange: (checked) => {
+        this.settings.showFocusBars = checked;
+        this.toggleFocusBarsDisplay();
+      }
+    });
+  }
+  /**
+   * Toggle focus bars visibility
+   */
+  toggleFocusBarsDisplay() {
+    const wordEl = this.dom.get("wordEl");
+    if (wordEl) {
+      wordEl.toggleClass("dashreader-focus-enabled", this.settings.showFocusBars);
+    }
   }
   // ============================================================================
   // SECTION 4: USER INTERACTIONS
@@ -2894,26 +4384,90 @@ var DashReaderView = class extends import_obsidian2.ItemView {
   }
   /**
    * Toggle breadcrumb visibility
+   * Uses effective setting (respects mobile profile)
    */
   toggleBreadcrumbDisplay() {
-    const shouldHide = !this.settings.showBreadcrumb;
+    const shouldHide = !this.engine.getEffectiveShowBreadcrumb();
     if (this.breadcrumbEl) {
       this.breadcrumbEl.toggleClass(CSS_CLASSES.hidden, shouldHide);
     }
   }
   /**
-   * Opens DashReader in a new tab (fullscreen-like experience)
-   * Creates a new leaf/tab and transfers the current reading session to it
+   * Toggles fullscreen modal for immersive reading experience
+   * If modal is open, closes it. Otherwise opens a new one.
+   * Shares the current engine state with the modal.
    */
-  async openInNewTab() {
-    const { workspace } = this.app;
-    const newLeaf = workspace.getLeaf("tab");
-    if (newLeaf) {
-      await newLeaf.setViewState({
-        type: VIEW_TYPE_DASHREADER,
-        active: true
-      });
-      void workspace.revealLeaf(newLeaf);
+  openFullscreen() {
+    if (this.fullscreenModal) {
+      this.fullscreenModal.close();
+      return;
+    }
+    if (this.engine.getTotalWords() === 0) {
+      return;
+    }
+    const modal = new FullscreenModal(
+      this.app,
+      this.engine,
+      this.settings,
+      () => {
+        this.fullscreenModal = null;
+        this.engine.setCallbacks(
+          this.onWordChange.bind(this),
+          this.onComplete.bind(this)
+        );
+        updatePlayPauseButtons(this.dom, this.engine.getIsPlaying());
+        this.refreshDisplayAfterFullscreen();
+      },
+      this.timeoutManager
+    );
+    this.fullscreenModal = modal;
+    modal.open();
+  }
+  /**
+   * Refreshes the sidebar display after returning from fullscreen
+   * Shows the current word position and updates all UI elements
+   */
+  refreshDisplayAfterFullscreen() {
+    const currentIndex = this.engine.getCurrentIndex();
+    const totalWords = this.engine.getTotalWords();
+    const words = this.engine.getWords();
+    if (this.minimapManager) {
+      this.minimapManager.updateCurrentPosition(currentIndex);
+    }
+    const progress = this.engine.getProgress();
+    this.dom.updateStyle("progressBar", "width", `${progress}%`);
+    this.updateStats();
+    if (currentIndex > 0 && currentIndex < totalWords && words[currentIndex]) {
+      const word = words[currentIndex];
+      const headingMatch = word.match(/^\[H(\d)\]/);
+      const calloutMatch = word.match(/^\[CALLOUT:([\w-]+)\]/);
+      let displayText = word;
+      let headingLevel = 0;
+      let showSeparator = false;
+      let calloutType;
+      if (headingMatch) {
+        headingLevel = parseInt(headingMatch[1]);
+        displayText = word.replace(/^\[H\d\]/, "");
+        showSeparator = true;
+      } else if (calloutMatch) {
+        calloutType = calloutMatch[1];
+        displayText = word.replace(/^\[CALLOUT:[\w-]+\]/, "");
+        showSeparator = true;
+      }
+      this.wordDisplay.displayWord(displayText, headingLevel, showSeparator, calloutType);
+      const context = this.engine.getCurrentHeadingContext(currentIndex);
+      if (context.breadcrumb.length > 0 && this.breadcrumbManager) {
+        this.breadcrumbManager.updateBreadcrumb(context);
+      }
+    } else {
+      const remainingWords = this.engine.getRemainingWords();
+      const durationText = this.statsFormatter.formatTime(this.engine.getEstimatedDuration());
+      this.wordDisplay.displayReadyMessage(
+        remainingWords,
+        totalWords,
+        currentIndex > 0 ? currentIndex : void 0,
+        durationText
+      );
     }
   }
   // ============================================================================
@@ -2982,6 +4536,7 @@ var DashReaderView = class extends import_obsidian2.ItemView {
    * Shortcuts:
    * - C: Toggle controls (when not playing)
    * - S: Toggle stats (when not playing)
+   * - F: Open fullscreen mode
    * - Shift+Space: Play/Pause
    * - Arrow keys: Rewind/Forward, WPM adjustment
    * - Escape: Stop reading
@@ -2999,6 +4554,11 @@ var DashReaderView = class extends import_obsidian2.ItemView {
     if (e.key === "s" && !this.engine.getIsPlaying()) {
       e.preventDefault();
       this.togglePanel("stats");
+      return;
+    }
+    if (e.key === "f" || e.key === "F") {
+      e.preventDefault();
+      this.openFullscreen();
       return;
     }
     this.hotkeyHandler.handleKeyPress(e);
@@ -3185,11 +4745,6 @@ var DashReaderView = class extends import_obsidian2.ItemView {
     }
     this.engine.setText(plainText, void 0, wordIndexFromCursor);
     this.state.update({ wordsRead: 0, startTime: 0 });
-    const welcomeMsg = this.wordEl.querySelector(`.${CSS_CLASSES.welcome}`);
-    if (welcomeMsg) {
-      welcomeMsg.remove();
-    }
-    this.wordEl.empty();
     this.updateStatsDisplay(wordIndexFromCursor, source);
     this.buildInitialBreadcrumb(wordIndexFromCursor != null ? wordIndexFromCursor : 0);
     this.minimapManager.render();
@@ -3208,17 +4763,266 @@ var DashReaderView = class extends import_obsidian2.ItemView {
     this.settings = settings;
     this.engine.updateSettings(settings);
     if (this.wordEl) {
-      this.wordEl.style.fontSize = `${settings.fontSize}px`;
+      this.wordEl.style.fontSize = `${this.engine.getEffectiveFontSize()}px`;
       this.wordEl.style.fontFamily = settings.fontFamily;
       this.wordEl.style.color = settings.fontColor;
     }
+    const wordEl = this.dom.get("wordEl");
+    if (wordEl) {
+      wordEl.toggleClass("dashreader-focus-enabled", settings.showFocusBars);
+    }
+    this.toggleBreadcrumbDisplay();
     this.dom.updateText("wpmDisplay", `${settings.wpm} WPM`);
   }
 };
 
 // src/settings.ts
-var import_obsidian3 = require("obsidian");
-var DashReaderSettingTab = class extends import_obsidian3.PluginSettingTab {
+var import_obsidian5 = require("obsidian");
+
+// src/services/font-family.ts
+var cachedFonts = null;
+var COMMON_FONTS = [
+  // Sans-serif
+  "Arial",
+  "Helvetica",
+  "Helvetica Neue",
+  "Verdana",
+  "Trebuchet MS",
+  "Tahoma",
+  "Segoe UI",
+  "Roboto",
+  "Open Sans",
+  "Inter",
+  "SF Pro",
+  "SF Pro Display",
+  // Serif
+  "Times New Roman",
+  "Georgia",
+  "Palatino",
+  "Garamond",
+  "Book Antiqua",
+  "Literata",
+  "Merriweather",
+  // Monospace
+  "Courier New",
+  "Monaco",
+  "Consolas",
+  "Menlo",
+  "SF Mono",
+  "JetBrains Mono",
+  "Fira Code",
+  "Source Code Pro",
+  // System defaults
+  "system-ui",
+  "-apple-system",
+  "BlinkMacSystemFont"
+];
+async function getInstalledFontFamilies() {
+  if (cachedFonts !== null) {
+    return cachedFonts;
+  }
+  const queryLocalFonts = window.queryLocalFonts;
+  if (typeof queryLocalFonts === "function") {
+    try {
+      const fonts = await queryLocalFonts();
+      const families = /* @__PURE__ */ new Set();
+      for (const font of fonts) {
+        if (font.family) {
+          families.add(font.family);
+        }
+      }
+      cachedFonts = Array.from(families).sort(
+        (a, b) => a.toLowerCase().localeCompare(b.toLowerCase())
+      );
+      return cachedFonts;
+    } catch (e) {
+    }
+  }
+  cachedFonts = [...COMMON_FONTS].sort(
+    (a, b) => a.toLowerCase().localeCompare(b.toLowerCase())
+  );
+  return cachedFonts;
+}
+
+// src/settings.ts
+var FontFamilySuggest = class {
+  constructor(containerEl, currentValue, onSelect) {
+    this.fonts = [];
+    this.filteredFonts = [];
+    this.selectedIndex = -1;
+    this.isOpen = false;
+    this.onSelect = onSelect;
+    const inputContainer = containerEl.createDiv({
+      cls: "dashreader-font-suggest-container"
+    });
+    this.inputEl = inputContainer.createEl("input", {
+      type: "text",
+      value: currentValue === "inherit" ? "" : currentValue,
+      placeholder: "Type to search fonts...",
+      cls: "dashreader-font-suggest-input"
+    });
+    if (currentValue && currentValue !== "inherit") {
+      this.inputEl.style.fontFamily = currentValue;
+    }
+    this.suggestEl = inputContainer.createDiv({
+      cls: "dashreader-font-suggest-dropdown"
+    });
+    void this.loadFonts();
+    this.setupEvents();
+  }
+  async loadFonts() {
+    this.fonts = [
+      "inherit",
+      "system-ui",
+      "serif",
+      "sans-serif",
+      "monospace",
+      "---",
+      // separator
+      ...await getInstalledFontFamilies()
+    ];
+    this.filteredFonts = this.fonts;
+  }
+  setupEvents() {
+    this.inputEl.addEventListener("input", () => this.onInput());
+    this.inputEl.addEventListener("focus", () => this.open());
+    this.inputEl.addEventListener("blur", () => {
+      setTimeout(() => this.close(), 150);
+    });
+    this.inputEl.addEventListener("keydown", (e) => this.onKeydown(e));
+  }
+  onInput() {
+    const query = this.inputEl.value.toLowerCase().trim();
+    if (!query) {
+      this.filteredFonts = this.fonts;
+    } else {
+      this.filteredFonts = this.fonts.filter(
+        (font) => font !== "---" && font.toLowerCase().includes(query)
+      );
+    }
+    this.selectedIndex = -1;
+    this.render();
+    this.open();
+  }
+  onKeydown(e) {
+    if (!this.isOpen) {
+      if (e.key === "ArrowDown" || e.key === "Enter") {
+        this.open();
+        e.preventDefault();
+      }
+      return;
+    }
+    switch (e.key) {
+      case "ArrowDown":
+        e.preventDefault();
+        this.selectNext();
+        break;
+      case "ArrowUp":
+        e.preventDefault();
+        this.selectPrevious();
+        break;
+      case "Enter":
+        e.preventDefault();
+        if (this.selectedIndex >= 0 && this.filteredFonts[this.selectedIndex]) {
+          this.selectFont(this.filteredFonts[this.selectedIndex]);
+        }
+        break;
+      case "Escape":
+        e.preventDefault();
+        this.close();
+        break;
+    }
+  }
+  selectNext() {
+    let next = this.selectedIndex + 1;
+    while (next < this.filteredFonts.length && this.filteredFonts[next] === "---") {
+      next++;
+    }
+    if (next < this.filteredFonts.length) {
+      this.selectedIndex = next;
+      this.render();
+      this.scrollToSelected();
+    }
+  }
+  selectPrevious() {
+    let prev = this.selectedIndex - 1;
+    while (prev >= 0 && this.filteredFonts[prev] === "---") {
+      prev--;
+    }
+    if (prev >= 0) {
+      this.selectedIndex = prev;
+      this.render();
+      this.scrollToSelected();
+    }
+  }
+  scrollToSelected() {
+    const items = this.suggestEl.querySelectorAll(".dashreader-font-suggest-item");
+    if (this.selectedIndex >= 0 && items[this.selectedIndex]) {
+      items[this.selectedIndex].scrollIntoView({ block: "nearest" });
+    }
+  }
+  selectFont(font) {
+    if (font === "---")
+      return;
+    const displayValue = font === "inherit" ? "" : font;
+    this.inputEl.value = displayValue;
+    if (font !== "inherit" && font !== "system-ui") {
+      this.inputEl.style.fontFamily = font;
+    } else {
+      this.inputEl.style.fontFamily = "";
+    }
+    this.onSelect(font);
+    this.close();
+  }
+  open() {
+    if (this.isOpen)
+      return;
+    this.isOpen = true;
+    this.render();
+    this.suggestEl.classList.add("is-open");
+  }
+  close() {
+    this.isOpen = false;
+    this.suggestEl.classList.remove("is-open");
+  }
+  render() {
+    this.suggestEl.empty();
+    const maxItems = 15;
+    const itemsToShow = this.filteredFonts.slice(0, maxItems);
+    itemsToShow.forEach((font, index) => {
+      if (font === "---") {
+        this.suggestEl.createDiv({ cls: "dashreader-font-suggest-separator" });
+        return;
+      }
+      const item = this.suggestEl.createDiv({
+        cls: "dashreader-font-suggest-item"
+      });
+      if (index === this.selectedIndex) {
+        item.classList.add("is-selected");
+      }
+      const displayName = font === "inherit" ? "Default (theme)" : font;
+      item.setText(displayName);
+      if (!["inherit", "system-ui", "serif", "sans-serif", "monospace"].includes(font)) {
+        item.style.fontFamily = font;
+      }
+      item.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        this.selectFont(font);
+      });
+      item.addEventListener("mouseenter", () => {
+        this.selectedIndex = index;
+        this.render();
+      });
+    });
+    if (this.filteredFonts.length > maxItems) {
+      const hint = this.suggestEl.createDiv({
+        cls: "dashreader-font-suggest-hint",
+        text: `${this.filteredFonts.length - maxItems} more fonts...`
+      });
+    }
+  }
+};
+var DashReaderSettingTab = class extends import_obsidian5.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
@@ -3261,9 +5065,9 @@ var DashReaderSettingTab = class extends import_obsidian3.PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    new import_obsidian3.Setting(containerEl).setName("Speed reader").setHeading();
-    new import_obsidian3.Setting(containerEl).setName("Reading").setHeading();
-    const wpmSetting = new import_obsidian3.Setting(containerEl).setName("Words per minute").setDesc("Reading speed (50-5000)");
+    new import_obsidian5.Setting(containerEl).setName("Speed reader").setHeading();
+    new import_obsidian5.Setting(containerEl).setName("Reading").setHeading();
+    const wpmSetting = new import_obsidian5.Setting(containerEl).setName("Words per minute").setDesc("Reading speed (50-5000)");
     this.createSliderWithInput(
       wpmSetting,
       50,
@@ -3276,7 +5080,7 @@ var DashReaderSettingTab = class extends import_obsidian3.PluginSettingTab {
         await this.plugin.saveSettings();
       }
     );
-    const chunkSetting = new import_obsidian3.Setting(containerEl).setName("Words at a time").setDesc("Number of words displayed simultaneously (1-5)");
+    const chunkSetting = new import_obsidian5.Setting(containerEl).setName("Words at a time").setDesc("Number of words displayed simultaneously (1-5)");
     this.createSliderWithInput(
       chunkSetting,
       1,
@@ -3289,7 +5093,7 @@ var DashReaderSettingTab = class extends import_obsidian3.PluginSettingTab {
         await this.plugin.saveSettings();
       }
     );
-    const fontSizeSetting = new import_obsidian3.Setting(containerEl).setName("Font size").setDesc("Font size in pixels (20-120px)");
+    const fontSizeSetting = new import_obsidian5.Setting(containerEl).setName("Font size").setDesc("Font size in pixels (20-120px)");
     this.createSliderWithInput(
       fontSizeSetting,
       20,
@@ -3302,20 +5106,107 @@ var DashReaderSettingTab = class extends import_obsidian3.PluginSettingTab {
         await this.plugin.saveSettings();
       }
     );
-    new import_obsidian3.Setting(containerEl).setName("Font family").setDesc("Font family for text display").addDropdown((dropdown) => dropdown.addOption("inherit", "Default").addOption("monospace", "Monospace").addOption("serif", "Serif").addOption("sans-serif", "Sans-serif").setValue(this.plugin.settings.fontFamily).onChange(async (value) => {
-      this.plugin.settings.fontFamily = value;
+    const fontSetting = new import_obsidian5.Setting(containerEl).setName("Font family").setDesc("Type to search system fonts, or choose a generic family");
+    new FontFamilySuggest(
+      fontSetting.controlEl,
+      this.plugin.settings.fontFamily,
+      async (value) => {
+        this.plugin.settings.fontFamily = value;
+        await this.plugin.saveSettings();
+      }
+    );
+    new import_obsidian5.Setting(containerEl).setName("Mobile override").setHeading();
+    containerEl.createEl("p", {
+      text: "These settings override desktop values when running on iOS/Android.",
+      cls: "setting-item-description"
+    });
+    const mobileWpmSetting = new import_obsidian5.Setting(containerEl).setName("Mobile: Words per minute").setDesc("Reading speed on mobile (50-5000)");
+    this.createSliderWithInput(
+      mobileWpmSetting,
+      50,
+      5e3,
+      25,
+      this.plugin.settings.mobileWpm,
+      "",
+      async (value) => {
+        this.plugin.settings.mobileWpm = value;
+        await this.plugin.saveSettings();
+      }
+    );
+    const mobileFontSizeSetting = new import_obsidian5.Setting(containerEl).setName("Mobile: Font size").setDesc("Font size on mobile in pixels (20-120px)");
+    this.createSliderWithInput(
+      mobileFontSizeSetting,
+      20,
+      120,
+      4,
+      this.plugin.settings.mobileFontSize,
+      "px",
+      async (value) => {
+        this.plugin.settings.mobileFontSize = value;
+        await this.plugin.saveSettings();
+      }
+    );
+    const mobileChunkSetting = new import_obsidian5.Setting(containerEl).setName("Mobile: Words at a time").setDesc("Number of words displayed on mobile (1-5)");
+    this.createSliderWithInput(
+      mobileChunkSetting,
+      1,
+      5,
+      1,
+      this.plugin.settings.mobileChunkSize,
+      "",
+      async (value) => {
+        this.plugin.settings.mobileChunkSize = value;
+        await this.plugin.saveSettings();
+      }
+    );
+    new import_obsidian5.Setting(containerEl).setName("Mobile: Show breadcrumb").setDesc("Display breadcrumb navigation on mobile").addToggle((toggle) => toggle.setValue(this.plugin.settings.mobileShowBreadcrumb).onChange(async (value) => {
+      this.plugin.settings.mobileShowBreadcrumb = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian3.Setting(containerEl).setName("Reading enhancements").setHeading();
-    new import_obsidian3.Setting(containerEl).setName("Slow start").setDesc("Gradually increase speed over first 5 words for comfortable start").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableSlowStart).onChange(async (value) => {
+    new import_obsidian5.Setting(containerEl).setName("Mobile: Slow start").setDesc("Enable slow start on mobile").addToggle((toggle) => toggle.setValue(this.plugin.settings.mobileEnableSlowStart).onChange(async (value) => {
+      this.plugin.settings.mobileEnableSlowStart = value;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian5.Setting(containerEl).setName("Mobile: Micropause").setDesc("Enable micropause on mobile").addToggle((toggle) => toggle.setValue(this.plugin.settings.mobileEnableMicropause).onChange(async (value) => {
+      this.plugin.settings.mobileEnableMicropause = value;
+      await this.plugin.saveSettings();
+    }));
+    const mobileContextWordsSetting = new import_obsidian5.Setting(containerEl).setName("Mobile: Context words").setDesc("Number of context words on mobile (0-20)");
+    this.createSliderWithInput(
+      mobileContextWordsSetting,
+      0,
+      20,
+      1,
+      this.plugin.settings.mobileContextWords,
+      "",
+      async (value) => {
+        this.plugin.settings.mobileContextWords = value;
+        await this.plugin.saveSettings();
+      }
+    );
+    const mobileContextFontSizeSetting = new import_obsidian5.Setting(containerEl).setName("Mobile: Context font size").setDesc("Font size for context text on mobile (10-32 px)");
+    this.createSliderWithInput(
+      mobileContextFontSizeSetting,
+      10,
+      32,
+      1,
+      this.plugin.settings.mobileContextFontSize,
+      "px",
+      async (value) => {
+        this.plugin.settings.mobileContextFontSize = value;
+        await this.plugin.saveSettings();
+      }
+    );
+    new import_obsidian5.Setting(containerEl).setName("Reading enhancements").setHeading();
+    new import_obsidian5.Setting(containerEl).setName("Slow start").setDesc("Gradually increase speed over first 5 words for comfortable start").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableSlowStart).onChange(async (value) => {
       this.plugin.settings.enableSlowStart = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian3.Setting(containerEl).setName("Enable acceleration").setDesc("Gradually increase reading speed over time").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableAcceleration).onChange(async (value) => {
+    new import_obsidian5.Setting(containerEl).setName("Enable acceleration").setDesc("Gradually increase reading speed over time").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableAcceleration).onChange(async (value) => {
       this.plugin.settings.enableAcceleration = value;
       await this.plugin.saveSettings();
     }));
-    const accelDurationSetting = new import_obsidian3.Setting(containerEl).setName("Acceleration duration").setDesc("Duration to reach target speed (seconds)");
+    const accelDurationSetting = new import_obsidian5.Setting(containerEl).setName("Acceleration duration").setDesc("Duration to reach target speed (seconds)");
     this.createSliderWithInput(
       accelDurationSetting,
       10,
@@ -3328,7 +5219,7 @@ var DashReaderSettingTab = class extends import_obsidian3.PluginSettingTab {
         await this.plugin.saveSettings();
       }
     );
-    const accelTargetSetting = new import_obsidian3.Setting(containerEl).setName("Target wpm").setDesc("Target reading speed to reach (50-5000)");
+    const accelTargetSetting = new import_obsidian5.Setting(containerEl).setName("Target wpm").setDesc("Target reading speed to reach (50-5000)");
     this.createSliderWithInput(
       accelTargetSetting,
       50,
@@ -3341,25 +5232,25 @@ var DashReaderSettingTab = class extends import_obsidian3.PluginSettingTab {
         await this.plugin.saveSettings();
       }
     );
-    new import_obsidian3.Setting(containerEl).setName("Appearance").setHeading();
-    new import_obsidian3.Setting(containerEl).setName("Highlight color").setDesc("Color for the center character highlight").addText((text) => text.setPlaceholder("#4a9eff").setValue(this.plugin.settings.highlightColor).onChange(async (value) => {
+    new import_obsidian5.Setting(containerEl).setName("Appearance").setHeading();
+    new import_obsidian5.Setting(containerEl).setName("Highlight color").setDesc("Color for the center character highlight").addText((text) => text.setPlaceholder("#4a9eff").setValue(this.plugin.settings.highlightColor).onChange(async (value) => {
       this.plugin.settings.highlightColor = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian3.Setting(containerEl).setName("Font color").setDesc("Text color").addText((text) => text.setPlaceholder("#ffffff").setValue(this.plugin.settings.fontColor).onChange(async (value) => {
+    new import_obsidian5.Setting(containerEl).setName("Font color").setDesc("Text color").addText((text) => text.setPlaceholder("#ffffff").setValue(this.plugin.settings.fontColor).onChange(async (value) => {
       this.plugin.settings.fontColor = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian3.Setting(containerEl).setName("Background color").setDesc("Background color").addText((text) => text.setPlaceholder("#1e1e1e").setValue(this.plugin.settings.backgroundColor).onChange(async (value) => {
+    new import_obsidian5.Setting(containerEl).setName("Background color").setDesc("Background color").addText((text) => text.setPlaceholder("#1e1e1e").setValue(this.plugin.settings.backgroundColor).onChange(async (value) => {
       this.plugin.settings.backgroundColor = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian3.Setting(containerEl).setName("Context display").setHeading();
-    new import_obsidian3.Setting(containerEl).setName("Show context").setDesc("Display words before and after current word").addToggle((toggle) => toggle.setValue(this.plugin.settings.showContext).onChange(async (value) => {
+    new import_obsidian5.Setting(containerEl).setName("Context display").setHeading();
+    new import_obsidian5.Setting(containerEl).setName("Show context").setDesc("Display words before and after current word").addToggle((toggle) => toggle.setValue(this.plugin.settings.showContext).onChange(async (value) => {
       this.plugin.settings.showContext = value;
       await this.plugin.saveSettings();
     }));
-    const contextSetting = new import_obsidian3.Setting(containerEl).setName("Context words").setDesc("Number of context words to display (1-10)");
+    const contextSetting = new import_obsidian5.Setting(containerEl).setName("Context words").setDesc("Number of context words to display (1-10)");
     this.createSliderWithInput(
       contextSetting,
       1,
@@ -3372,21 +5263,51 @@ var DashReaderSettingTab = class extends import_obsidian3.PluginSettingTab {
         await this.plugin.saveSettings();
       }
     );
-    new import_obsidian3.Setting(containerEl).setName("Navigation").setHeading();
-    new import_obsidian3.Setting(containerEl).setName("Show minimap").setDesc("Display vertical minimap with document structure and progress").addToggle((toggle) => toggle.setValue(this.plugin.settings.showMinimap).onChange(async (value) => {
+    const contextFontSizeSetting = new import_obsidian5.Setting(containerEl).setName("Context font size").setDesc("Font size for context text (10-32 px)");
+    this.createSliderWithInput(
+      contextFontSizeSetting,
+      10,
+      32,
+      1,
+      this.plugin.settings.contextFontSize,
+      "px",
+      async (value) => {
+        this.plugin.settings.contextFontSize = value;
+        await this.plugin.saveSettings();
+      }
+    );
+    const minTokenFontSizeSetting = new import_obsidian5.Setting(containerEl).setName("Minimum token font size").setDesc("Minimum font size for long words that need shrinking (8-48 px)");
+    this.createSliderWithInput(
+      minTokenFontSizeSetting,
+      8,
+      48,
+      1,
+      this.plugin.settings.minTokenFontSize,
+      "px",
+      async (value) => {
+        this.plugin.settings.minTokenFontSize = value;
+        await this.plugin.saveSettings();
+      }
+    );
+    new import_obsidian5.Setting(containerEl).setName("Show focus bars").setDesc("Display Reedy-style horizontal bars and vertical ORP indicator for enhanced focus").addToggle((toggle) => toggle.setValue(this.plugin.settings.showFocusBars).onChange(async (value) => {
+      this.plugin.settings.showFocusBars = value;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian5.Setting(containerEl).setName("Navigation").setHeading();
+    new import_obsidian5.Setting(containerEl).setName("Show minimap").setDesc("Display vertical minimap with document structure and progress").addToggle((toggle) => toggle.setValue(this.plugin.settings.showMinimap).onChange(async (value) => {
       this.plugin.settings.showMinimap = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian3.Setting(containerEl).setName("Show breadcrumb").setDesc("Display breadcrumb navigation at the top").addToggle((toggle) => toggle.setValue(this.plugin.settings.showBreadcrumb).onChange(async (value) => {
+    new import_obsidian5.Setting(containerEl).setName("Show breadcrumb").setDesc("Display breadcrumb navigation at the top").addToggle((toggle) => toggle.setValue(this.plugin.settings.showBreadcrumb).onChange(async (value) => {
       this.plugin.settings.showBreadcrumb = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian3.Setting(containerEl).setName("Micropause").setHeading();
-    new import_obsidian3.Setting(containerEl).setName("Enable micropause").setDesc("Automatic pauses based on punctuation and word length").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableMicropause).onChange(async (value) => {
+    new import_obsidian5.Setting(containerEl).setName("Micropause").setHeading();
+    new import_obsidian5.Setting(containerEl).setName("Enable micropause").setDesc("Automatic pauses based on punctuation and word length").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableMicropause).onChange(async (value) => {
       this.plugin.settings.enableMicropause = value;
       await this.plugin.saveSettings();
     }));
-    const punctuationSetting = new import_obsidian3.Setting(containerEl).setName("Sentence-ending punctuation pause").setDesc("Pause multiplier for .,!? (1.0-3.0)");
+    const punctuationSetting = new import_obsidian5.Setting(containerEl).setName("Sentence-ending punctuation pause").setDesc("Pause multiplier for .,!? (1.0-3.0)");
     this.createSliderWithInput(
       punctuationSetting,
       1,
@@ -3399,7 +5320,7 @@ var DashReaderSettingTab = class extends import_obsidian3.PluginSettingTab {
         await this.plugin.saveSettings();
       }
     );
-    const otherPunctuationSetting = new import_obsidian3.Setting(containerEl).setName("Other punctuation pause").setDesc("Pause multiplier for ;:, (1.0-3.0)");
+    const otherPunctuationSetting = new import_obsidian5.Setting(containerEl).setName("Other punctuation pause").setDesc("Pause multiplier for ;:, (1.0-3.0)");
     this.createSliderWithInput(
       otherPunctuationSetting,
       1,
@@ -3412,7 +5333,7 @@ var DashReaderSettingTab = class extends import_obsidian3.PluginSettingTab {
         await this.plugin.saveSettings();
       }
     );
-    const longWordsSetting = new import_obsidian3.Setting(containerEl).setName("Long words pause").setDesc("Pause multiplier for long words >8 chars (1.0-2.0)");
+    const longWordsSetting = new import_obsidian5.Setting(containerEl).setName("Long words pause").setDesc("Pause multiplier for long words >8 chars (1.0-2.0)");
     this.createSliderWithInput(
       longWordsSetting,
       1,
@@ -3425,7 +5346,7 @@ var DashReaderSettingTab = class extends import_obsidian3.PluginSettingTab {
         await this.plugin.saveSettings();
       }
     );
-    const paragraphSetting = new import_obsidian3.Setting(containerEl).setName("Paragraph pause").setDesc("Pause multiplier for paragraph breaks (1.0-5.0)");
+    const paragraphSetting = new import_obsidian5.Setting(containerEl).setName("Paragraph pause").setDesc("Pause multiplier for paragraph breaks (1.0-5.0)");
     this.createSliderWithInput(
       paragraphSetting,
       1,
@@ -3438,7 +5359,7 @@ var DashReaderSettingTab = class extends import_obsidian3.PluginSettingTab {
         await this.plugin.saveSettings();
       }
     );
-    const numbersSetting = new import_obsidian3.Setting(containerEl).setName("Numbers pause").setDesc("Pause multiplier for numbers and dates (1.0-3.0)");
+    const numbersSetting = new import_obsidian5.Setting(containerEl).setName("Numbers pause").setDesc("Pause multiplier for numbers and dates (1.0-3.0)");
     this.createSliderWithInput(
       numbersSetting,
       1,
@@ -3451,7 +5372,7 @@ var DashReaderSettingTab = class extends import_obsidian3.PluginSettingTab {
         await this.plugin.saveSettings();
       }
     );
-    const sectionMarkersSetting = new import_obsidian3.Setting(containerEl).setName("Section markers pause").setDesc("Pause multiplier for 1., i., a., etc. (1.0-3.0)");
+    const sectionMarkersSetting = new import_obsidian5.Setting(containerEl).setName("Section markers pause").setDesc("Pause multiplier for 1., i., a., etc. (1.0-3.0)");
     this.createSliderWithInput(
       sectionMarkersSetting,
       1,
@@ -3464,7 +5385,7 @@ var DashReaderSettingTab = class extends import_obsidian3.PluginSettingTab {
         await this.plugin.saveSettings();
       }
     );
-    const listBulletsSetting = new import_obsidian3.Setting(containerEl).setName("List bullets pause").setDesc("Pause multiplier for -, *, +, \u2022 (1.0-3.0)");
+    const listBulletsSetting = new import_obsidian5.Setting(containerEl).setName("List bullets pause").setDesc("Pause multiplier for -, *, +, \u2022 (1.0-3.0)");
     this.createSliderWithInput(
       listBulletsSetting,
       1,
@@ -3477,7 +5398,7 @@ var DashReaderSettingTab = class extends import_obsidian3.PluginSettingTab {
         await this.plugin.saveSettings();
       }
     );
-    const calloutsSetting = new import_obsidian3.Setting(containerEl).setName("Callouts pause").setDesc("Pause multiplier for Obsidian callouts (1.0-3.0)");
+    const calloutsSetting = new import_obsidian5.Setting(containerEl).setName("Callouts pause").setDesc("Pause multiplier for Obsidian callouts (1.0-3.0)");
     this.createSliderWithInput(
       calloutsSetting,
       1,
@@ -3490,12 +5411,12 @@ var DashReaderSettingTab = class extends import_obsidian3.PluginSettingTab {
         await this.plugin.saveSettings();
       }
     );
-    new import_obsidian3.Setting(containerEl).setName("Auto-start").setHeading();
-    new import_obsidian3.Setting(containerEl).setName("Auto-start reading").setDesc("Automatically start reading after text loads").addToggle((toggle) => toggle.setValue(this.plugin.settings.autoStart).onChange(async (value) => {
+    new import_obsidian5.Setting(containerEl).setName("Auto-start").setHeading();
+    new import_obsidian5.Setting(containerEl).setName("Auto-start reading").setDesc("Automatically start reading after text loads").addToggle((toggle) => toggle.setValue(this.plugin.settings.autoStart).onChange(async (value) => {
       this.plugin.settings.autoStart = value;
       await this.plugin.saveSettings();
     }));
-    const autoStartDelaySetting = new import_obsidian3.Setting(containerEl).setName("Auto-start delay").setDesc("Delay before auto-start (seconds)");
+    const autoStartDelaySetting = new import_obsidian5.Setting(containerEl).setName("Auto-start delay").setDesc("Delay before auto-start (seconds)");
     this.createSliderWithInput(
       autoStartDelaySetting,
       1,
@@ -3508,16 +5429,16 @@ var DashReaderSettingTab = class extends import_obsidian3.PluginSettingTab {
         await this.plugin.saveSettings();
       }
     );
-    new import_obsidian3.Setting(containerEl).setName("Display").setHeading();
-    new import_obsidian3.Setting(containerEl).setName("Show progress bar").setDesc("Display reading progress bar").addToggle((toggle) => toggle.setValue(this.plugin.settings.showProgress).onChange(async (value) => {
+    new import_obsidian5.Setting(containerEl).setName("Display").setHeading();
+    new import_obsidian5.Setting(containerEl).setName("Show progress bar").setDesc("Display reading progress bar").addToggle((toggle) => toggle.setValue(this.plugin.settings.showProgress).onChange(async (value) => {
       this.plugin.settings.showProgress = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian3.Setting(containerEl).setName("Show statistics").setDesc("Display reading statistics").addToggle((toggle) => toggle.setValue(this.plugin.settings.showStats).onChange(async (value) => {
+    new import_obsidian5.Setting(containerEl).setName("Show statistics").setDesc("Display reading statistics").addToggle((toggle) => toggle.setValue(this.plugin.settings.showStats).onChange(async (value) => {
       this.plugin.settings.showStats = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian3.Setting(containerEl).setName("Keyboard shortcuts").setHeading();
+    new import_obsidian5.Setting(containerEl).setName("Keyboard shortcuts").setHeading();
     containerEl.createEl("p", {
       text: "Note: hotkey customization is available in Obsidian's hotkeys settings.",
       cls: "setting-item-description"
@@ -3527,6 +5448,7 @@ var DashReaderSettingTab = class extends import_obsidian3.PluginSettingTab {
 
 // src/types.ts
 var DEFAULT_SETTINGS = {
+  // Desktop settings
   wpm: 400,
   // Increased from 300 (inspired by Stutter: 400-800 range)
   chunkSize: 1,
@@ -3537,6 +5459,12 @@ var DEFAULT_SETTINGS = {
   fontFamily: "inherit",
   showContext: false,
   contextWords: 3,
+  contextFontSize: 14,
+  // Context text font size
+  minTokenFontSize: 12,
+  // Minimum font size for long word shrinking
+  showFocusBars: false,
+  // Reedy-style focus bars (off by default)
   showMinimap: true,
   showBreadcrumb: true,
   enableMicropause: true,
@@ -3570,8 +5498,19 @@ var DEFAULT_SETTINGS = {
   // Enable slow start by default
   enableAcceleration: false,
   accelerationDuration: 30,
-  accelerationTargetWpm: 600
+  accelerationTargetWpm: 600,
   // Increased from 450 (Stutter suggests 600-800)
+  // Mobile overrides (smaller font, slower speed for better mobile experience)
+  mobileFontSize: 32,
+  mobileWpm: 350,
+  mobileChunkSize: 1,
+  mobileShowBreadcrumb: true,
+  mobileEnableSlowStart: true,
+  mobileEnableMicropause: true,
+  mobileContextWords: 2,
+  // Fewer context words on mobile
+  mobileContextFontSize: 12
+  // Smaller context font on mobile
 };
 
 // src/services/settings-validator.ts
@@ -3580,6 +5519,8 @@ var LIMITS2 = {
   chunkSize: { min: 1, max: 10 },
   fontSize: { min: 12, max: 120 },
   contextWords: { min: 0, max: 20 },
+  contextFontSize: { min: 10, max: 32 },
+  minTokenFontSize: { min: 8, max: 48 },
   autoStartDelay: { min: 0, max: 60 },
   accelerationDuration: { min: 1, max: 300 },
   accelerationTargetWpm: { min: 50, max: 5e3 },
@@ -3641,6 +5582,18 @@ function validateSettings(partial) {
       DEFAULT_SETTINGS.contextWords,
       LIMITS2.contextWords.min,
       LIMITS2.contextWords.max
+    ),
+    contextFontSize: validateNumber(
+      partial.contextFontSize,
+      DEFAULT_SETTINGS.contextFontSize,
+      LIMITS2.contextFontSize.min,
+      LIMITS2.contextFontSize.max
+    ),
+    minTokenFontSize: validateNumber(
+      partial.minTokenFontSize,
+      DEFAULT_SETTINGS.minTokenFontSize,
+      LIMITS2.minTokenFontSize.min,
+      LIMITS2.minTokenFontSize.max
     ),
     autoStartDelay: validateNumber(
       partial.autoStartDelay,
@@ -3723,6 +5676,7 @@ function validateSettings(partial) {
     hotkeyQuit: validateString(partial.hotkeyQuit, DEFAULT_SETTINGS.hotkeyQuit),
     // Boolean settings
     showContext: validateBoolean(partial.showContext, DEFAULT_SETTINGS.showContext),
+    showFocusBars: validateBoolean(partial.showFocusBars, DEFAULT_SETTINGS.showFocusBars),
     showMinimap: validateBoolean(partial.showMinimap, DEFAULT_SETTINGS.showMinimap),
     showBreadcrumb: validateBoolean(partial.showBreadcrumb, DEFAULT_SETTINGS.showBreadcrumb),
     enableMicropause: validateBoolean(partial.enableMicropause, DEFAULT_SETTINGS.enableMicropause),
@@ -3730,20 +5684,89 @@ function validateSettings(partial) {
     showProgress: validateBoolean(partial.showProgress, DEFAULT_SETTINGS.showProgress),
     showStats: validateBoolean(partial.showStats, DEFAULT_SETTINGS.showStats),
     enableSlowStart: validateBoolean(partial.enableSlowStart, DEFAULT_SETTINGS.enableSlowStart),
-    enableAcceleration: validateBoolean(partial.enableAcceleration, DEFAULT_SETTINGS.enableAcceleration)
+    enableAcceleration: validateBoolean(partial.enableAcceleration, DEFAULT_SETTINGS.enableAcceleration),
+    // Mobile override settings
+    mobileFontSize: validateNumber(
+      partial.mobileFontSize,
+      DEFAULT_SETTINGS.mobileFontSize,
+      LIMITS2.fontSize.min,
+      LIMITS2.fontSize.max
+    ),
+    mobileWpm: validateNumber(
+      partial.mobileWpm,
+      DEFAULT_SETTINGS.mobileWpm,
+      LIMITS2.wpm.min,
+      LIMITS2.wpm.max
+    ),
+    mobileChunkSize: validateNumber(
+      partial.mobileChunkSize,
+      DEFAULT_SETTINGS.mobileChunkSize,
+      LIMITS2.chunkSize.min,
+      LIMITS2.chunkSize.max
+    ),
+    mobileShowBreadcrumb: validateBoolean(partial.mobileShowBreadcrumb, DEFAULT_SETTINGS.mobileShowBreadcrumb),
+    mobileEnableSlowStart: validateBoolean(partial.mobileEnableSlowStart, DEFAULT_SETTINGS.mobileEnableSlowStart),
+    mobileEnableMicropause: validateBoolean(partial.mobileEnableMicropause, DEFAULT_SETTINGS.mobileEnableMicropause),
+    mobileContextWords: validateNumber(
+      partial.mobileContextWords,
+      DEFAULT_SETTINGS.mobileContextWords,
+      LIMITS2.contextWords.min,
+      LIMITS2.contextWords.max
+    ),
+    mobileContextFontSize: validateNumber(
+      partial.mobileContextFontSize,
+      DEFAULT_SETTINGS.mobileContextFontSize,
+      LIMITS2.contextFontSize.min,
+      LIMITS2.contextFontSize.max
+    )
   };
 }
 
 // main.ts
-var DashReaderPlugin = class extends import_obsidian4.Plugin {
+var DashReaderPlugin = class extends import_obsidian6.Plugin {
   async onload() {
     await this.loadSettings();
     this.registerView(
       VIEW_TYPE_DASHREADER,
       (leaf) => new DashReaderView(leaf, this.settings)
     );
-    this.addRibbonIcon("zap", "Open speed reader", () => {
+    this.addRibbonIcon("zap", "RSVP sidebar", () => {
       void this.activateView();
+    });
+    this.addRibbonIcon("scan", "RSVP fullscreen", () => {
+      const text = this.getActiveTextOrSelection();
+      if (!text) {
+        new import_obsidian6.Notice("No text to read. Open a note or select text first.");
+        return;
+      }
+      const plainText = MarkdownParser.parseToPlainText(text);
+      if (!plainText || plainText.trim().length < 10) {
+        new import_obsidian6.Notice("Text too short to read");
+        return;
+      }
+      const timeoutManager = new TimeoutManager();
+      const engine = new RSVPEngine(
+        this.settings,
+        () => {
+        },
+        // Will be overridden by modal
+        () => {
+        },
+        // Will be overridden by modal
+        timeoutManager
+      );
+      engine.setText(plainText);
+      const modal = new FullscreenModal(
+        this.app,
+        engine,
+        this.settings,
+        () => {
+          timeoutManager.clearAll();
+        },
+        timeoutManager
+      );
+      modal.open();
+      engine.play();
     });
     this.addCommand({
       id: "open",
@@ -3765,7 +5788,7 @@ var DashReaderPlugin = class extends import_obsidian4.Plugin {
             }
           });
         } else {
-          new import_obsidian4.Notice("Please select some text first");
+          new import_obsidian6.Notice("Please select some text first");
         }
       }
     });
@@ -3773,7 +5796,7 @@ var DashReaderPlugin = class extends import_obsidian4.Plugin {
       id: "read-note",
       name: "Read entire note",
       callback: () => {
-        const activeView = this.app.workspace.getActiveViewOfType(import_obsidian4.MarkdownView);
+        const activeView = this.app.workspace.getActiveViewOfType(import_obsidian6.MarkdownView);
         if (activeView) {
           const content = activeView.editor.getValue();
           void this.activateView().then(() => {
@@ -3783,15 +5806,54 @@ var DashReaderPlugin = class extends import_obsidian4.Plugin {
             }
           });
         } else {
-          new import_obsidian4.Notice("No active note found");
+          new import_obsidian6.Notice("No active note found");
         }
+      }
+    });
+    this.addCommand({
+      id: "read-fullscreen",
+      name: "Read in fullscreen mode",
+      callback: () => {
+        const text = this.getActiveTextOrSelection();
+        if (!text) {
+          new import_obsidian6.Notice("No text to read. Open a note or select text first.");
+          return;
+        }
+        const plainText = MarkdownParser.parseToPlainText(text);
+        if (!plainText || plainText.trim().length < 10) {
+          new import_obsidian6.Notice("Text too short to read");
+          return;
+        }
+        const timeoutManager = new TimeoutManager();
+        const engine = new RSVPEngine(
+          this.settings,
+          () => {
+          },
+          // Will be overridden by modal
+          () => {
+          },
+          // Will be overridden by modal
+          timeoutManager
+        );
+        engine.setText(plainText);
+        const modal = new FullscreenModal(
+          this.app,
+          engine,
+          this.settings,
+          () => {
+            timeoutManager.clearAll();
+          },
+          timeoutManager
+        );
+        modal.open();
+        engine.play();
       }
     });
     this.addCommand({
       id: "toggle-play-pause",
       name: "Toggle play/pause",
       callback: () => {
-        new import_obsidian4.Notice("Use Shift+Space key when speed reader is active");
+        new import_obsidian6.Notice("Use Shift+Space key when speed reader is active");
       }
     });
     this.registerEvent(
@@ -3827,6 +5889,26 @@ var DashReaderPlugin = class extends import_obsidian4.Plugin {
     const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_DASHREADER);
     if (leaves.length > 0) {
       return leaves[0].view;
+    }
+    return null;
+  }
+  /**
+   * Gets text from selection or active note
+   * Prioritizes selection over full note content
+   */
+  getActiveTextOrSelection() {
+    const activeView = this.app.workspace.getActiveViewOfType(import_obsidian6.MarkdownView);
+    if (!activeView) {
+      return null;
+    }
+    const editor = activeView.editor;
+    const selection = editor.getSelection();
+    if (selection && selection.trim().length > 0) {
+      return selection;
+    }
+    const content = editor.getValue();
+    if (content && content.trim().length > 0) {
+      return content;
     }
     return null;
   }

@@ -152,6 +152,8 @@
   gap: 30px;
   padding: 60px 40px;
   min-height: 400px;
+  /* Allow ORP-shifted content to overflow */
+  overflow: visible;
 }
 
 /* Contexte */
@@ -179,16 +181,21 @@
   text-align: center;
   color: var(--text-normal);
   min-height: 100px;
-  min-width: 300px;
+  width: 100%; /* Fill container width for ORP centering */
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 30px 50px;
+  padding: 30px 0; /* Horizontal padding removed for accurate centering */
   background: transparent;
   border-radius: 0;
   transition: transform 0.05s ease;
   user-select: none;
   letter-spacing: 0.02em;
+  /* Allow ORP-shifted content to overflow */
+  overflow: visible;
+  /* Position above focus bars */
+  position: relative;
+  z-index: 1;
 }
 
 /* Message de bienvenue géré via JS */
@@ -375,6 +382,139 @@
 .dashreader-minimap-tooltip.visible {
   right: 60px;
   opacity: 1;
+}
+
+/* ===== MINIMAP HORIZONTALE ===== */
+.dashreader-minimap-horizontal {
+  position: relative;
+  display: flex;
+  width: 100%;
+  height: 24px;
+  background: var(--background-secondary);
+  border-radius: 4px;
+  overflow: hidden;
+  cursor: pointer;
+  opacity: 1;
+  transform: none;
+  right: auto;
+  top: auto;
+  max-height: none;
+  border: 1px solid var(--background-modifier-border);
+}
+
+.dashreader-minimap-horizontal:hover {
+  opacity: 1;
+}
+
+/* Progress fill for horizontal */
+.dashreader-minimap-horizontal .dashreader-minimap-progress {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0%;
+  height: 100%;
+  background: linear-gradient(90deg,
+    var(--interactive-accent) 0%,
+    var(--interactive-accent-hover) 100%);
+  opacity: 0.3;
+  transition: width 0.1s linear;
+  pointer-events: none;
+}
+
+/* Sections (proportional bars) */
+.dashreader-minimap-section {
+  position: relative;
+  height: 100%;
+  background: var(--background-modifier-border);
+  opacity: 0.4;
+  transition: opacity 0.2s ease, background 0.2s ease;
+  border-right: 1px solid var(--background-primary);
+  flex-shrink: 0;
+}
+
+.dashreader-minimap-section:last-child {
+  border-right: none;
+}
+
+.dashreader-minimap-section-heading {
+  opacity: 0.6;
+}
+
+.dashreader-minimap-section-heading[data-level="1"] {
+  opacity: 0.8;
+  background: var(--text-muted);
+}
+
+.dashreader-minimap-section-heading[data-level="2"] {
+  opacity: 0.7;
+}
+
+.dashreader-minimap-section:hover {
+  opacity: 1;
+  background: var(--interactive-accent);
+}
+
+.dashreader-minimap-section-current {
+  opacity: 1;
+  background: var(--interactive-accent);
+}
+
+/* Section labels (heading names) */
+.dashreader-minimap-section-label {
+  position: absolute;
+  bottom: 100%;
+  left: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: calc(100% - 8px);
+  font-size: 10px;
+  color: var(--text-muted);
+  padding: 2px 0;
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+.dashreader-minimap-section-label[data-level="1"] {
+  font-weight: 600;
+  font-size: 11px;
+  color: var(--text-normal);
+  opacity: 1;
+}
+
+.dashreader-minimap-section-label[data-level="2"] {
+  font-weight: 500;
+  opacity: 0.9;
+}
+
+.dashreader-minimap-section:hover .dashreader-minimap-section-label {
+  opacity: 1;
+  color: var(--text-normal);
+}
+
+/* Position indicator (vertical line) */
+.dashreader-minimap-position {
+  position: absolute;
+  left: 0%;
+  top: 0;
+  width: 2px;
+  height: 100%;
+  background: var(--text-accent);
+  z-index: 10;
+  pointer-events: none;
+  transition: left 0.1s linear;
+  box-shadow: 0 0 4px var(--text-accent);
+}
+
+/* Horizontal tooltip (positioned above) */
+.dashreader-minimap-horizontal + .dashreader-minimap-tooltip,
+.dashreader-minimap-horizontal ~ .dashreader-minimap-tooltip {
+  right: auto;
+  transform: translateX(-50%);
+}
+
+.dashreader-minimap-horizontal .dashreader-minimap-tooltip.visible {
+  right: auto;
 }
 
 /* ===== CONTRÔLES (Cachés par défaut) ===== */
@@ -778,12 +918,118 @@
 
 .dashreader-word-with-heading {
   transition: font-size 0.3s ease;
+  /* Allow ORP centering transform */
+  display: inline-block;
+  white-space: nowrap;
 }
 
 /* Callout icon styling */
 .dashreader-callout-icon {
   margin-right: 8px;
   opacity: 0.8;
+}
+
+/* ===== FOCUS BARS & ORP ANCHORING SYSTEM ===== */
+
+/* Add CSS variables for focus bars to word container */
+.dashreader-word,
+.dashreader-fullscreen-word {
+  --dashreader-focus-band: 96px;
+  --dashreader-focus-left: 48%;
+}
+
+/* Container for focus bars overlay - always present for ORP anchoring */
+.dashreader-focus-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Horizontal focus lines (top and bottom) - Reedy style */
+.dashreader-focus-lines {
+  box-sizing: border-box;
+  position: absolute;
+  inset: auto 0;
+  top: 50%;
+  height: var(--dashreader-focus-band);
+  transform: translateY(-50%);
+  border-top: 3px solid var(--interactive-accent);
+  border-bottom: 3px solid var(--interactive-accent);
+  opacity: 0.6;
+}
+
+/* Vertical dashes at ORP position - positioned via CSS variable */
+.dashreader-focus-dashes {
+  box-sizing: border-box;
+  position: absolute;
+  left: var(--dashreader-focus-left);
+  top: 50%;
+  height: var(--dashreader-focus-band);
+  width: 3px;
+  transform: translate(-50%, -50%);
+  opacity: 1;
+}
+
+/* Top/bottom dashes styling */
+.dashreader-focus-dashes::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-top: 16px solid var(--interactive-accent);
+  border-bottom: 16px solid var(--interactive-accent);
+}
+
+/* Hide focus bars visually but keep them for measurement when not running or not enabled */
+.dashreader-focus-lines,
+.dashreader-focus-dashes {
+  visibility: hidden;
+}
+
+/* Show focus bars when enabled AND running */
+.dashreader-focus-enabled[data-running="true"] .dashreader-focus-lines,
+.dashreader-focus-enabled[data-running="true"] .dashreader-focus-dashes {
+  visibility: visible;
+}
+
+/* ORP character enhanced styling when focus bars enabled */
+.dashreader-focus-enabled .dashreader-orp {
+  text-decoration: underline;
+  text-decoration-color: var(--interactive-accent);
+  text-underline-offset: 4px;
+}
+
+/* Content container (above overlay) */
+.dashreader-word-content {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  min-height: 60px;
+  text-align: center;
+}
+
+/* ORP viewport - keeps the word centered before shift */
+.dashreader-orp-viewport {
+  width: 100%;
+  overflow: visible;
+  white-space: nowrap;
+  position: relative;
+  display: flex;
+  justify-content: center;
+}
+
+/* Focus word container */
+.dashreader-focus-word {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* ORP line - shifted to align ORP with focus dashes */
+.dashreader-orp-line {
+  display: inline-flex;
+  align-items: center;
+  transform: translateX(0);
+  will-change: transform;
 }
 
 /* ===== SETTINGS TAB COMPONENTS ===== */
@@ -801,4 +1047,479 @@
 .dashreader-slider-unit {
   margin-left: 4px;
   opacity: 0.7;
+}
+
+/* ===== FULLSCREEN MODAL ===== */
+/* Backdrop with blur effect */
+.dashreader-fullscreen-backdrop {
+  background-color: color-mix(in srgb, var(--background-primary) 70%, transparent) !important;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+/* Modal container */
+.dashreader-fullscreen-modal {
+  width: 95vw !important;
+  max-width: 1200px !important;
+  height: 90vh !important;
+  max-height: 90vh !important;
+  border-radius: 16px !important;
+  overflow: hidden !important;
+}
+
+/* Modal content */
+.dashreader-fullscreen-content {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  padding: 0;
+  position: relative;
+  background: var(--background-primary);
+}
+
+/* Settings button (top right, next to Obsidian close button) */
+.dashreader-fullscreen-settings-btn {
+  position: absolute;
+  top: 12px;
+  right: 52px;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  opacity: 0.7;
+  transition: all 0.15s ease;
+  z-index: 100;
+}
+
+.dashreader-fullscreen-settings-btn:hover {
+  opacity: 1;
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+/* Breadcrumb in fullscreen */
+.dashreader-fullscreen-breadcrumb {
+  padding: 16px 60px 16px 24px;
+  opacity: 0.7;
+}
+
+/* Main display area */
+.dashreader-fullscreen-display {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  min-height: 0;
+  /* Allow ORP-shifted content to overflow */
+  overflow: visible;
+}
+
+/* Word display in fullscreen - LARGER */
+.dashreader-fullscreen-word {
+  font-size: 72px;
+  font-weight: 500;
+  text-align: center;
+  color: var(--text-normal);
+  min-height: 150px;
+  width: 100%; /* Fill container width for ORP centering */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 0; /* Horizontal padding removed for accurate centering */
+  user-select: none;
+  letter-spacing: 0.02em;
+  /* Allow ORP-shifted content to overflow */
+  overflow: visible;
+  /* Position above focus bars */
+  position: relative;
+  z-index: 1;
+}
+
+/* Fullscreen word content - flex container for centering */
+.dashreader-fullscreen-word .dashreader-word-content {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+}
+
+/* Fullscreen word with heading - allow expansion */
+.dashreader-fullscreen-word .dashreader-word-with-heading {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+}
+
+/* Fullscreen viewport - flex layout like fork for proper sizing */
+.dashreader-fullscreen-word .dashreader-orp-viewport {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  display: flex;
+  justify-content: center;
+}
+
+/* Minimap container in fullscreen - clickable when paused */
+.dashreader-fullscreen-minimap-container {
+  width: 100%;
+  padding: 24px 24px 8px 24px;
+  margin-top: auto;
+  cursor: pointer;
+}
+
+/* Minimap bar in fullscreen should be taller and show labels */
+.dashreader-fullscreen-minimap-container .dashreader-minimap-horizontal {
+  height: 16px;
+  overflow: visible;
+}
+
+.dashreader-fullscreen-minimap-container:hover {
+  opacity: 0.9;
+}
+
+.dashreader-fullscreen-minimap-container.scrubbing {
+  cursor: grabbing;
+}
+
+/* Stats display - split layout (words left, time right) */
+.dashreader-fullscreen-stats-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 24px;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.dashreader-fullscreen-stats-left,
+.dashreader-fullscreen-stats-right {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Controls */
+.dashreader-fullscreen-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 16px 20px;
+  gap: 12px;
+  background: var(--background-secondary);
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.dashreader-fullscreen-controls .dashreader-control-group {
+  gap: 12px;
+}
+
+.dashreader-fullscreen-controls .dashreader-btn {
+  padding: 12px 20px;
+  font-size: 18px;
+}
+
+/* Lucide icon buttons in fullscreen controls */
+.dashreader-fullscreen-controls .dashreader-toggle-btn {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--background-modifier-hover);
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.dashreader-fullscreen-controls .dashreader-toggle-btn:hover {
+  background: var(--background-modifier-active-hover);
+  color: var(--text-normal);
+  border-color: var(--background-modifier-border);
+}
+
+.dashreader-fullscreen-controls .dashreader-toggle-btn:active {
+  transform: scale(0.95);
+}
+
+.dashreader-fullscreen-controls .dashreader-toggle-btn svg {
+  width: 20px;
+  height: 20px;
+  pointer-events: none;
+}
+
+/* Settings panel in fullscreen */
+.dashreader-fullscreen-settings {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 0;
+}
+
+.dashreader-fullscreen-settings .dashreader-control-group {
+  gap: 6px;
+}
+
+/* Toggles row in fullscreen */
+.dashreader-fullscreen-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 16px;
+}
+
+.dashreader-fullscreen-toggles .dashreader-setting-group {
+  margin: 0;
+}
+
+/* Responsive adjustments for fullscreen */
+@media (max-width: 768px) {
+  .dashreader-fullscreen-modal {
+    width: 100vw !important;
+    height: 100vh !important;
+    max-width: 100vw !important;
+    max-height: 100vh !important;
+    border-radius: 0 !important;
+  }
+
+  .dashreader-fullscreen-content {
+    padding: 0;
+  }
+
+  /* Breadcrumb - compact, show only last element on mobile */
+  .dashreader-fullscreen-breadcrumb {
+    padding: 8px 12px;
+    font-size: 11px;
+    max-width: 100%;
+    overflow: hidden;
+    /* Use direction trick to truncate from left side */
+    direction: rtl;
+    text-align: left;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  /* Restore normal direction for content */
+  .dashreader-fullscreen-breadcrumb > * {
+    direction: ltr;
+    unicode-bidi: bidi-override;
+  }
+
+  /* Hide intermediate items, show only icon + last item + dropdown */
+  .dashreader-fullscreen-breadcrumb .dashreader-breadcrumb-item:not(:last-of-type) {
+    display: none;
+  }
+
+  .dashreader-fullscreen-breadcrumb .dashreader-breadcrumb-separator {
+    display: none;
+  }
+
+  /* Keep dropdown visible */
+  .dashreader-fullscreen-breadcrumb .dashreader-breadcrumb-dropdown {
+    display: inline-block;
+  }
+
+  /* Display area - reduced padding */
+  .dashreader-fullscreen-display {
+    padding: 16px 12px;
+  }
+
+  /* Word display - constrained to screen width */
+  .dashreader-fullscreen-word {
+    font-size: 32px;
+    padding: 12px 4px;
+    min-height: 80px;
+    max-width: 100%;
+    overflow: hidden;
+  }
+
+  /* Word content must not overflow - strict containment */
+  .dashreader-fullscreen-word .dashreader-word-content {
+    max-width: 100%;
+    overflow: hidden;
+    min-height: auto;
+  }
+
+  .dashreader-fullscreen-word .dashreader-orp-viewport {
+    max-width: 100%;
+    overflow: hidden;
+  }
+
+  /* ORP anchoring stays active - shrinking handles overflow */
+  .dashreader-fullscreen-word .dashreader-orp-line {
+    transition: transform 0.05s ease;
+  }
+
+  /* Word container - shrinking will handle oversized words */
+  .dashreader-fullscreen-word .dashreader-focus-word {
+    white-space: nowrap;
+  }
+
+  /* Heading container */
+  .dashreader-fullscreen-word .dashreader-word-with-heading {
+    max-width: 100%;
+  }
+
+  /* Stats row - compact */
+  .dashreader-fullscreen-stats-row {
+    padding: 6px 16px;
+    font-size: 12px;
+  }
+
+  /* Minimap - simplified for mobile */
+  .dashreader-fullscreen-minimap-container {
+    padding: 8px 16px;
+  }
+
+  .dashreader-fullscreen-minimap-container .dashreader-minimap-horizontal {
+    height: 12px;
+  }
+
+  /* Hide labels on mobile - too cluttered */
+  .dashreader-fullscreen-minimap-container .dashreader-minimap-section-label {
+    display: none;
+  }
+
+  /* Controls - HORIZONTAL ROW, not column */
+  .dashreader-fullscreen-controls {
+    flex-direction: row;
+    justify-content: center;
+    padding: 12px 16px;
+    gap: 16px;
+  }
+
+  .dashreader-fullscreen-controls .dashreader-control-group {
+    flex-direction: row;
+    gap: 16px;
+  }
+
+  .dashreader-fullscreen-controls .dashreader-toggle-btn {
+    width: 48px;
+    height: 48px;
+  }
+
+  .dashreader-fullscreen-controls .dashreader-toggle-btn svg {
+    width: 24px;
+    height: 24px;
+  }
+
+  .dashreader-fullscreen-controls .dashreader-btn {
+    padding: 10px 16px;
+    font-size: 16px;
+  }
+
+  /* Settings button - adjust position */
+  .dashreader-fullscreen-settings-btn {
+    top: 8px;
+    right: 44px;
+    width: 28px;
+    height: 28px;
+  }
+
+  /* Settings panel - stack vertically on mobile */
+  .dashreader-fullscreen-settings {
+    flex-direction: column;
+    gap: 12px;
+    padding: 12px;
+  }
+
+  .dashreader-fullscreen-toggles {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+}
+
+/* ===== FONT FAMILY SUGGEST ===== */
+.dashreader-font-suggest-container {
+  position: relative;
+  width: 200px;
+}
+
+.dashreader-font-suggest-input {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  font-size: 14px;
+}
+
+.dashreader-font-suggest-input:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px var(--interactive-accent-hover);
+}
+
+.dashreader-font-suggest-input::placeholder {
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
+.dashreader-font-suggest-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: 4px;
+  max-height: 300px;
+  overflow-y: auto;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  display: none;
+}
+
+.dashreader-font-suggest-dropdown.is-open {
+  display: block;
+}
+
+.dashreader-font-suggest-item {
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background-color 0.1s ease;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.dashreader-font-suggest-item:last-child {
+  border-bottom: none;
+}
+
+.dashreader-font-suggest-item:hover,
+.dashreader-font-suggest-item.is-selected {
+  background: var(--background-modifier-hover);
+}
+
+.dashreader-font-suggest-item.is-selected {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.dashreader-font-suggest-separator {
+  height: 1px;
+  background: var(--background-modifier-border);
+  margin: 4px 0;
+}
+
+.dashreader-font-suggest-hint {
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+  font-style: italic;
 }
