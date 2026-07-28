@@ -45,6 +45,7 @@
 // SECTION 1: IMPORTS & TYPE DEFINITIONS
 // ============================================================================
 
+import { setIcon } from 'obsidian';
 import { CSS_CLASSES, ICONS } from './constants';
 import { DOMRegistry, DOMElementKey } from './dom-registry';
 
@@ -231,10 +232,20 @@ export function createButton(
     : CSS_CLASSES.btn;
 
   const btn = parent.createEl('button', {
-    text: config.icon,
     cls: className,
-    attr: { title: config.title }
+    attr: {
+      title: config.title,
+      'aria-label': config.title,
+      type: 'button'
+    }
   });
+
+  // Support both Lucide icons (lucide:icon-name) and emoji/text icons
+  if (config.icon.startsWith('lucide:')) {
+    setIcon(btn, config.icon.slice('lucide:'.length));
+  } else {
+    btn.setText(config.icon);
+  }
 
   btn.addEventListener('click', config.onClick);
   return btn;
@@ -412,8 +423,14 @@ export function updatePlayPauseButtons(
   registry: DOMRegistry,
   isPlaying: boolean
 ): void {
-  registry.toggleClass('playBtn', CSS_CLASSES.hidden, isPlaying);
-  registry.toggleClass('pauseBtn', CSS_CLASSES.hidden, !isPlaying);
+  // Use explicit add/remove for more reliable behavior
+  if (isPlaying) {
+    registry.addClass('playBtn', CSS_CLASSES.hidden);
+    registry.removeClass('pauseBtn', CSS_CLASSES.hidden);
+  } else {
+    registry.removeClass('playBtn', CSS_CLASSES.hidden);
+    registry.addClass('pauseBtn', CSS_CLASSES.hidden);
+  }
 }
 
 // ============================================================================

@@ -1925,8 +1925,7 @@ var WordDisplay = class {
     const line = viewport.createDiv({ cls: "dashreader-orp-line" });
     const orpEl = this.buildWordSpans(line, displayText);
     const focusWordEl = line.querySelector(".dashreader-focus-word");
-    const isFullscreen = this.wordEl.classList.contains("dashreader-fullscreen-word");
-    const shouldShrink = isFullscreen && displayText !== "\n" && displayText.trim().length > 0;
+    const shouldShrink = false;
     requestAnimationFrame(() => {
       wordContainer.style.fontSize = `${adjustedFontSize}px`;
       if (viewport.clientWidth === 0) {
@@ -3216,13 +3215,9 @@ var FullscreenModal = class extends import_obsidian2.Modal {
     const currentIndex = this.engine.getCurrentIndex();
     const totalWords = this.engine.getTotalWords();
     this.statsLeftEl.setText(`${currentIndex}/${totalWords}`);
-    const isPlaying = this.engine.getIsPlaying();
-    const realElapsed = this.engine.getElapsedTime();
-    const elapsedTime = isPlaying && realElapsed > 0 ? realElapsed : this.engine.getEstimatedTimeAtCurrentPosition();
-    const totalEstimate = this.engine.getTotalEstimatedDuration();
-    const elapsedText = this.statsFormatter.formatTime(elapsedTime);
-    const totalText = this.statsFormatter.formatTime(totalEstimate);
-    this.statsRightEl.setText(`${elapsedText}/${totalText}`);
+    const remainingTime = this.engine.getRemainingTime();
+    const remainingText = this.statsFormatter.formatTime(remainingTime);
+    this.statsRightEl.setText(remainingText);
   }
   /**
    * Sets up click/drag interaction on the minimap for scrubbing when paused
@@ -3235,16 +3230,7 @@ var FullscreenModal = class extends import_obsidian2.Modal {
       const ratio = x / rect.width;
       const targetIndex = Math.floor(ratio * this.engine.getTotalWords());
       this.engine.goToIndex(targetIndex);
-      this.updateProgress();
-      this.updateStats();
-      const words = this.engine.getWords();
-      if (words[targetIndex]) {
-        this.displayWord(words[targetIndex]);
-      }
-      const context = this.engine.getCurrentHeadingContext(targetIndex);
-      if (context.breadcrumb.length > 0 && this.breadcrumbManager) {
-        this.breadcrumbManager.updateBreadcrumb(context);
-      }
+      this.updateAfterNavigation();
     };
     this.minimapContainer.addEventListener("mousedown", (e) => {
       if (this.engine.getIsPlaying())
@@ -3373,13 +3359,18 @@ var FullscreenModal = class extends import_obsidian2.Modal {
     }, { passive: false, capture: true });
   }
   /**
-   * Updates display after time-based navigation
+   * Updates display after navigation
+   * Adjusts position to avoid pauses (line breaks)
    */
   updateAfterNavigation() {
-    const currentIndex = this.engine.getCurrentIndex();
+    let currentIndex = this.engine.getCurrentIndex();
+    const words = this.engine.getWords();
+    currentIndex = this.adjustIndexToAvoidPause(currentIndex, words);
+    if (currentIndex !== this.engine.getCurrentIndex()) {
+      this.engine.goToIndex(currentIndex);
+    }
     this.updateProgress();
     this.updateStats();
-    const words = this.engine.getWords();
     if (words[currentIndex]) {
       this.displayWord(words[currentIndex]);
     }
@@ -3387,6 +3378,24 @@ var FullscreenModal = class extends import_obsidian2.Modal {
     if (context.breadcrumb.length > 0 && this.breadcrumbManager) {
       this.breadcrumbManager.updateBreadcrumb(context);
     }
+  }
+  /**
+   * Adjusts index to avoid landing on pause words ('\n')
+   * Moves forward to next non-pause word
+   */
+  adjustIndexToAvoidPause(index, words) {
+    const maxIndex = words.length - 1;
+    let adjusted = index;
+    while (adjusted < maxIndex && words[adjusted] === "\n") {
+      adjusted++;
+    }
+    if (adjusted >= maxIndex && words[adjusted] === "\n") {
+      adjusted = index;
+      while (adjusted > 0 && words[adjusted] === "\n") {
+        adjusted--;
+      }
+    }
+    return adjusted;
   }
   /**
    * Schedules resuming playback after scroll navigation

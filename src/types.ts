@@ -1,4 +1,5 @@
 export interface DashReaderSettings {
+  // Desktop settings
   wpm: number;
   chunkSize: number;
   fontSize: number;
@@ -8,6 +9,9 @@ export interface DashReaderSettings {
   fontFamily: string;
   showContext: boolean;
   contextWords: number;
+  contextFontSize: number;       // Font size for context text (10-32px)
+  minTokenFontSize: number;      // Minimum font size for long words shrinking (8-48px)
+  showFocusBars: boolean;        // Show Reedy-style focus bars (horizontal lines + ORP indicator)
   showMinimap: boolean;
   showBreadcrumb: boolean;
   enableMicropause: boolean;
@@ -33,9 +37,20 @@ export interface DashReaderSettings {
   enableAcceleration: boolean;
   accelerationDuration: number;
   accelerationTargetWpm: number;
+
+  // Mobile overrides (override desktop settings on mobile devices)
+  mobileFontSize: number;
+  mobileWpm: number;
+  mobileChunkSize: number;
+  mobileShowBreadcrumb: boolean;
+  mobileEnableSlowStart: boolean;
+  mobileEnableMicropause: boolean;
+  mobileContextWords: number;
+  mobileContextFontSize: number;
 }
 
 export const DEFAULT_SETTINGS: DashReaderSettings = {
+  // Desktop settings
   wpm: 400, // Increased from 300 (inspired by Stutter: 400-800 range)
   chunkSize: 1,
   fontSize: 48,
@@ -45,6 +60,9 @@ export const DEFAULT_SETTINGS: DashReaderSettings = {
   fontFamily: 'inherit',
   showContext: false,
   contextWords: 3,
+  contextFontSize: 14,           // Context text font size
+  minTokenFontSize: 12,          // Minimum font size for long word shrinking
+  showFocusBars: false,          // Reedy-style focus bars (off by default)
   showMinimap: true,
   showBreadcrumb: true,
   enableMicropause: true,
@@ -69,7 +87,17 @@ export const DEFAULT_SETTINGS: DashReaderSettings = {
   enableSlowStart: true, // Enable slow start by default
   enableAcceleration: false,
   accelerationDuration: 30,
-  accelerationTargetWpm: 600 // Increased from 450 (Stutter suggests 600-800)
+  accelerationTargetWpm: 600, // Increased from 450 (Stutter suggests 600-800)
+
+  // Mobile overrides (smaller font, slower speed for better mobile experience)
+  mobileFontSize: 32,
+  mobileWpm: 350,
+  mobileChunkSize: 1,
+  mobileShowBreadcrumb: true,
+  mobileEnableSlowStart: true,
+  mobileEnableMicropause: true,
+  mobileContextWords: 2,         // Fewer context words on mobile
+  mobileContextFontSize: 12,     // Smaller context font on mobile
 };
 
 export interface HeadingInfo {

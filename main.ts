@@ -3,6 +3,10 @@ import { DashReaderView, VIEW_TYPE_DASHREADER } from './src/rsvp-view';
 import { DashReaderSettingTab } from './src/settings';
 import { DashReaderSettings } from './src/types';
 import { validateSettings } from './src/services/settings-validator';
+import { RSVPEngine } from './src/rsvp-engine';
+import { FullscreenModal } from './src/fullscreen-modal';
+import { TimeoutManager } from './src/services/timeout-manager';
+import { MarkdownParser } from './src/markdown-parser';
 
 export default class DashReaderPlugin extends Plugin {
   settings: DashReaderSettings;
@@ -16,9 +20,50 @@ export default class DashReaderPlugin extends Plugin {
       (leaf) => new DashReaderView(leaf, this.settings)
     );
 
-    // Ajouter l'icône dans la ribbon
-    this.addRibbonIcon('zap', 'Open speed reader', () => {
+    // Ajouter les icônes dans la ribbon
+    this.addRibbonIcon('zap', 'RSVP sidebar', () => {
       void this.activateView();
+    });
+
+    this.addRibbonIcon('scan', 'RSVP fullscreen', () => {
+      const text = this.getActiveTextOrSelection();
+      if (!text) {
+        new Notice('No text to read. Open a note or select text first.');
+        return;
+      }
+
+      // Parse markdown to plain text
+      const plainText = MarkdownParser.parseToPlainText(text);
+      if (!plainText || plainText.trim().length < 10) {
+        new Notice('Text too short to read');
+        return;
+      }
+
+      // Create a temporary engine for fullscreen reading
+      const timeoutManager = new TimeoutManager();
+      const engine = new RSVPEngine(
+        this.settings,
+        () => {}, // Will be overridden by modal
+        () => {}, // Will be overridden by modal
+        timeoutManager
+      );
+      engine.setText(plainText);
+
+      // Open fullscreen modal
+      const modal = new FullscreenModal(
+        this.app,
+        engine,
+        this.settings,
+        () => {
+          // Cleanup when modal closes
+          timeoutManager.clearAll();
+        },
+        timeoutManager
+      );
+      modal.open();
+
+      // Auto-start reading
+      engine.play();
     });
 
     // Command: Open DashReader
@@ -66,6 +111,52 @@ export default class DashReaderPlugin extends Plugin {
         } else {
           new Notice('No active note found');
         }
+      }
+    });
+
+    // Command: Read in fullscreen mode (direct)
+    this.addCommand({
+      id: 'read-fullscreen',
+      name: 'Read in fullscreen mode',
+      callback: () => {
+        const text = this.getActiveTextOrSelection();
+        if (!text) {
+          new Notice('No text to read. Open a note or select text first.');
+          return;
+        }
+
+        // Parse markdown to plain text
+        const plainText = MarkdownParser.parseToPlainText(text);
+        if (!plainText || plainText.trim().length < 10) {
+          new Notice('Text too short to read');
+          return;
+        }
+
+        // Create a temporary engine for fullscreen reading
+        const timeoutManager = new TimeoutManager();
+        const engine = new RSVPEngine(
+          this.settings,
+          () => {}, // Will be overridden by modal
+          () => {}, // Will be overridden by modal
+          timeoutManager
+        );
+        engine.setText(plainText);
+
+        // Open fullscreen modal
+        const modal = new FullscreenModal(
+          this.app,
+          engine,
+          this.settings,
+          () => {
+            // Cleanup when modal closes
+            timeoutManager.clearAll();
+          },
+          timeoutManager
+        );
+        modal.open();
+
+        // Auto-start reading
+        engine.play();
       }
     });
 
@@ -124,6 +215,33 @@ export default class DashReaderPlugin extends Plugin {
     if (leaves.length > 0) {
       return leaves[0].view as unknown as DashReaderView;
     }
+    return null;
+  }
+
+  /**
+   * Gets text from selection or active note
+   * Prioritizes selection over full note content
+   */
+  private getActiveTextOrSelection(): string | null {
+    const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (!activeView) {
+      return null;
+    }
+
+    const editor = activeView.editor;
+
+    // Check for selection first
+    const selection = editor.getSelection();
+    if (selection && selection.trim().length > 0) {
+      return selection;
+    }
+
+    // Fall back to entire note content
+    const content = editor.getValue();
+    if (content && content.trim().length > 0) {
+      return content;
+    }
+
     return null;
   }
 

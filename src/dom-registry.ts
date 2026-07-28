@@ -88,13 +88,19 @@ export type DOMElementKey =
   | 'statsText'         // Statistics text element
   | 'progressBar'       // Reading progress bar
   | 'wordEl'            // Main word display element
+  | 'displayArea'       // Display area container (for focus bars)
   | 'contextBeforeEl'   // Context before current word
   | 'contextAfterEl'    // Context after current word
-  | 'playBtn'           // Play button
-  | 'pauseBtn'          // Pause button
+  | 'playBtn'           // Play button (sidebar)
+  | 'pauseBtn'          // Pause button (sidebar)
+  | 'playPauseBtn'      // Combined play/pause button (fullscreen)
   | 'controlsEl'        // Controls panel container
   | 'settingsEl'        // Settings panel container
-  | 'statsEl';          // Stats panel container
+  | 'settingsPanel'     // Settings panel in fullscreen modal
+  | 'statsEl'           // Stats panel container
+  | 'statsLeftEl'       // Left stats (word count) in fullscreen
+  | 'statsRightEl'      // Right stats (time) in fullscreen
+  | 'progressFillEl';   // Progress bar fill in fullscreen
 
 // ============================================================================
 // 2. DOMREGISTRY CLASS
@@ -260,7 +266,8 @@ export class DOMRegistry {
   toggleClass(key: DOMElementKey, className: string, force: boolean): void {
     const element = this.elements.get(key);
     if (element) {
-      element.toggleClass(className, force);
+      // Use standard classList.toggle for consistent behavior
+      element.classList.toggle(className, force);
     }
   }
 

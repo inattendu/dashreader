@@ -169,10 +169,9 @@ export class WordDisplay {
     const orpEl = this.buildWordSpans(line, displayText);
     const focusWordEl = line.querySelector('.dashreader-focus-word') as HTMLElement | null;
 
-    // Shrink only in fullscreen mode (where viewport has overflow:hidden)
-    // In sidebar mode, overflow:visible allows text to extend naturally
-    const isFullscreen = this.wordEl.classList.contains('dashreader-fullscreen-word');
-    const shouldShrink = isFullscreen && displayText !== '\n' && displayText.trim().length > 0;
+    // Shrinking disabled - causes more problems than it solves
+    // Text displays at configured size, overflow handled by CSS
+    const shouldShrink = false;
 
     // Defer ORP anchoring until layout is available
     requestAnimationFrame(() => {

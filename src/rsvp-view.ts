@@ -51,7 +51,7 @@
 // SECTION 1: IMPORTS & CONSTANTS
 // ============================================================================
 
-import { ItemView, WorkspaceLeaf } from 'obsidian';
+import { ItemView, WorkspaceLeaf, Platform } from 'obsidian';
 import { RSVPEngine } from './rsvp-engine';
 import { DashReaderSettings, WordChunk } from './types';
 import { MarkdownParser } from './markdown-parser';
@@ -63,6 +63,7 @@ import { HotkeyHandler } from './hotkey-handler';
 import { MinimapManager } from './minimap-manager';
 import { TimeoutManager } from './services/timeout-manager';
 import { StatsFormatter } from './services/stats-formatter';
+import { FullscreenModal } from './fullscreen-modal';
 import {
   createButton,
   createNumberControl,
@@ -166,6 +167,9 @@ export class DashReaderView extends ItemView {
   /** Breadcrumb navigation showing current heading context */
   private breadcrumbEl: HTMLElement;
 
+  /** Currently open fullscreen modal (null if none) */
+  private fullscreenModal: FullscreenModal | null = null;
+
   // ──────────────────────────────────────────────────────────────────────
   // Constructor
   // ──────────────────────────────────────────────────────────────────────
@@ -214,6 +218,25 @@ export class DashReaderView extends ItemView {
   }
 
   // ──────────────────────────────────────────────────────────────────────
+  // Mobile Detection
+  // ──────────────────────────────────────────────────────────────────────
+
+  /**
+   * Detects if running on a mobile device (iOS/Android)
+   * Uses Obsidian's Platform API with fallback to media query
+   * @returns true if on mobile device
+   */
+  private isMobileUI(): boolean {
+    // Try Obsidian's Platform API first
+    if (Platform.isMobileApp || Platform.isMobile) {
+      return true;
+    }
+
+    // Fallback: media query for touch devices without hover
+    return window.matchMedia?.('(hover: none) and (pointer: coarse)')?.matches ?? false;
+  }
+
+  // ──────────────────────────────────────────────────────────────────────
   // Obsidian View Lifecycle
   // ──────────────────────────────────────────────────────────────────────
 
@@ -248,12 +271,18 @@ export class DashReaderView extends ItemView {
   async onOpen(): Promise<void> {
     // Note: async required by Obsidian's ItemView interface
     await Promise.resolve();
+
+    // Apply mobile profile if on mobile device
+    const isMobile = this.isMobileUI();
+    this.engine.setUseMobileProfile(isMobile);
+
     this.mainContainerEl = this.contentEl.createDiv({ cls: CSS_CLASSES.container });
     this.buildUI();
 
     // Initialize modules after UI is built
     this.breadcrumbManager = new BreadcrumbManager(this.breadcrumbEl, this.engine, this.timeoutManager);
-    this.wordDisplay = new WordDisplay(this.wordEl, this.settings);
+    const displayArea = this.dom.get('displayArea');
+    this.wordDisplay = new WordDisplay(this.wordEl, this.settings, displayArea || undefined);
     this.hotkeyHandler = new HotkeyHandler(this.settings, {
       onTogglePlay: () => this.togglePlay(),
       onRewind: () => this.engine.rewind(),
@@ -263,6 +292,7 @@ export class DashReaderView extends ItemView {
       onQuit: () => this.engine.stop()
     });
     this.minimapManager = new MinimapManager(this.mainContainerEl, this.engine, this.timeoutManager);
+    this.setupMinimapWheelNavigation();
 
     // Display welcome message now that wordDisplay is initialized
     this.wordDisplay.displayWelcomeMessage(
@@ -339,8 +369,8 @@ export class DashReaderView extends ItemView {
 
     createButton(this.toggleBar, {
       icon: ICONS.expand,
-      title: 'Open in new tab',
-      onClick: () => void this.openInNewTab(),
+      title: 'Fullscreen mode (F)',
+      onClick: () => this.openFullscreen(),
       className: CSS_CLASSES.toggleBtn,
     });
   }
@@ -382,6 +412,7 @@ export class DashReaderView extends ItemView {
    */
   private buildDisplayArea(): void {
     const displayArea = this.mainContainerEl.createDiv({ cls: CSS_CLASSES.display });
+    this.dom.register('displayArea', displayArea);
 
     // Context before (optional)
     if (this.settings.showContext) {
@@ -390,18 +421,205 @@ export class DashReaderView extends ItemView {
     }
 
     // Main word display
+    // Note: WordDisplay constructor creates the focus bars overlay internally
     this.wordEl = displayArea.createDiv({ cls: CSS_CLASSES.word });
-    this.wordEl.style.fontSize = `${this.settings.fontSize}px`;
+    // Use effective font size (respects mobile profile)
+    this.wordEl.style.fontSize = `${this.engine.getEffectiveFontSize()}px`;
     this.wordEl.style.fontFamily = this.settings.fontFamily;
     this.wordEl.style.color = this.settings.fontColor;
-    // Welcome message will be set after wordDisplay is initialized
     this.dom.register('wordEl', this.wordEl);
+
+    // Apply focus bars class if enabled (on wordEl, not displayArea)
+    if (this.settings.showFocusBars) {
+      this.wordEl.addClass('dashreader-focus-enabled');
+    }
 
     // Context after (optional)
     if (this.settings.showContext) {
       this.contextAfterEl = displayArea.createDiv({ cls: CSS_CLASSES.contextAfter });
       this.dom.register('contextAfterEl', this.contextAfterEl);
     }
+
+    // Setup wheel/trackpad navigation on display area
+    this.setupWheelNavigation(displayArea);
+  }
+
+  /**
+   * Sets up wheel/trackpad navigation for word-by-word scrubbing
+   * Based on fork implementation for smooth, responsive scrolling
+   * Only works when paused
+   */
+  private setupWheelNavigation(displayArea: HTMLElement): void {
+    let wheelAccum = 0;
+    let wheelDir = 0;
+    let wasPlayingBeforeScroll = false;
+    const WHEEL_THRESHOLD = 80;
+
+    displayArea.addEventListener('wheel', (e: WheelEvent) => {
+      // Skip if modifier keys pressed (allow zoom, etc.)
+      if (e.ctrlKey || e.metaKey) return;
+
+      // Skip if target is an interactive element
+      const target = e.target as HTMLElement;
+      if (target?.closest('button, a, input, textarea, select')) return;
+
+      e.preventDefault();
+
+      // Normalize deltaY based on deltaMode
+      let dy = e.deltaY;
+      if (e.deltaMode === 1) {
+        // Line mode (Firefox)
+        dy *= 16;
+      } else if (e.deltaMode === 2) {
+        // Page mode
+        dy *= 800;
+      }
+
+      // Reset accumulator on direction change
+      const dir = Math.sign(dy);
+      if (dir !== 0 && dir !== wheelDir) {
+        wheelAccum = 0;
+        wheelDir = dir;
+      }
+
+      wheelAccum += dy;
+
+      // Forward (scroll down)
+      if (wheelAccum >= WHEEL_THRESHOLD) {
+        wheelAccum -= WHEEL_THRESHOLD;
+        wheelAccum = Math.min(wheelAccum, WHEEL_THRESHOLD - 1);
+        // Pause if playing before navigating, track that we were playing
+        if (this.engine.getIsPlaying()) {
+          wasPlayingBeforeScroll = true;
+          this.engine.pause();
+          updatePlayPauseButtons(this.dom, false);
+        }
+        this.engine.forward(1);
+        this.updateAfterWheelNavigation();
+        this.scheduleResumeAfterScroll(wasPlayingBeforeScroll, () => { wasPlayingBeforeScroll = false; });
+      }
+      // Backward (scroll up)
+      else if (wheelAccum <= -WHEEL_THRESHOLD) {
+        wheelAccum += WHEEL_THRESHOLD;
+        wheelAccum = Math.max(wheelAccum, -(WHEEL_THRESHOLD - 1));
+        // Pause if playing before navigating, track that we were playing
+        if (this.engine.getIsPlaying()) {
+          wasPlayingBeforeScroll = true;
+          this.engine.pause();
+          updatePlayPauseButtons(this.dom, false);
+        }
+        this.engine.rewind(1);
+        this.updateAfterWheelNavigation();
+        this.scheduleResumeAfterScroll(wasPlayingBeforeScroll, () => { wasPlayingBeforeScroll = false; });
+      }
+    }, { passive: false, capture: true });
+  }
+
+  /**
+   * Updates display after wheel navigation
+   */
+  private updateAfterWheelNavigation(): void {
+    const currentIndex = this.engine.getCurrentIndex();
+    const words = this.engine.getWords();
+
+    // Update minimap
+    if (this.minimapManager) {
+      this.minimapManager.updateCurrentPosition(currentIndex);
+    }
+
+    // Update progress bar
+    const progress = this.engine.getProgress();
+    this.dom.updateStyle('progressBar', 'width', `${progress}%`);
+
+    // Update stats
+    this.updateStats();
+
+    // Display the word
+    if (words[currentIndex]) {
+      const word = words[currentIndex];
+      const headingMatch = word.match(/^\[H(\d)\]/);
+      const calloutMatch = word.match(/^\[CALLOUT:([\w-]+)\]/);
+
+      let displayText = word;
+      let headingLevel = 0;
+      let calloutType: string | undefined;
+
+      if (headingMatch) {
+        headingLevel = parseInt(headingMatch[1]);
+        displayText = word.replace(/^\[H\d\]/, '');
+      } else if (calloutMatch) {
+        calloutType = calloutMatch[1];
+        displayText = word.replace(/^\[CALLOUT:[\w-]+\]/, '');
+      }
+
+      this.wordDisplay.displayWord(displayText, headingLevel, false, calloutType);
+
+      // Update breadcrumb
+      const context = this.engine.getCurrentHeadingContext(currentIndex);
+      if (context.breadcrumb.length > 0 && this.breadcrumbManager) {
+        this.breadcrumbManager.updateBreadcrumb(context);
+      }
+    }
+  }
+
+  // Timer for resuming after scroll navigation
+  private scrollResumeTimerId: ReturnType<typeof setTimeout> | null = null;
+  private readonly SCROLL_RESUME_DELAY = 800; // ms before resuming after scroll
+
+  /**
+   * Sets up wheel navigation on the minimap
+   * Uses the same pause/resume logic as the main display area
+   */
+  private setupMinimapWheelNavigation(): void {
+    let wasPlayingBeforeScroll = false;
+
+    this.minimapManager.setupWheelNavigation(
+      // On forward (scroll down)
+      () => {
+        if (this.engine.getIsPlaying()) {
+          wasPlayingBeforeScroll = true;
+          this.engine.pause();
+          updatePlayPauseButtons(this.dom, false);
+        }
+        this.engine.forward(1);
+        this.updateAfterWheelNavigation();
+        this.scheduleResumeAfterScroll(wasPlayingBeforeScroll, () => { wasPlayingBeforeScroll = false; });
+      },
+      // On backward (scroll up)
+      () => {
+        if (this.engine.getIsPlaying()) {
+          wasPlayingBeforeScroll = true;
+          this.engine.pause();
+          updatePlayPauseButtons(this.dom, false);
+        }
+        this.engine.rewind(1);
+        this.updateAfterWheelNavigation();
+        this.scheduleResumeAfterScroll(wasPlayingBeforeScroll, () => { wasPlayingBeforeScroll = false; });
+      }
+    );
+  }
+
+  /**
+   * Schedules resuming playback after scroll navigation
+   * Uses debounce - resets timer on each scroll
+   */
+  private scheduleResumeAfterScroll(wasPlaying: boolean, resetCallback: () => void): void {
+    // Clear any existing timer
+    if (this.scrollResumeTimerId) {
+      clearTimeout(this.scrollResumeTimerId);
+      this.scrollResumeTimerId = null;
+    }
+
+    // Only schedule resume if we were playing before
+    if (!wasPlaying) return;
+
+    this.scrollResumeTimerId = setTimeout(() => {
+      this.scrollResumeTimerId = null;
+      resetCallback();
+      // Resume playback
+      this.engine.play();
+      updatePlayPauseButtons(this.dom, true);
+    }, this.SCROLL_RESUME_DELAY);
   }
 
   /**
@@ -567,6 +785,26 @@ export class DashReaderView extends ItemView {
         this.engine.updateSettings(this.settings);
       },
     });
+
+    // Focus bars toggle (Reedy-style)
+    createToggleControl(this.settingsEl, {
+      label: 'Focus bars',
+      checked: this.settings.showFocusBars,
+      onChange: (checked) => {
+        this.settings.showFocusBars = checked;
+        this.toggleFocusBarsDisplay();
+      },
+    });
+  }
+
+  /**
+   * Toggle focus bars visibility
+   */
+  private toggleFocusBarsDisplay(): void {
+    const wordEl = this.dom.get('wordEl');
+    if (wordEl) {
+      wordEl.toggleClass('dashreader-focus-enabled', this.settings.showFocusBars);
+    }
   }
 
   // ============================================================================
@@ -670,33 +908,116 @@ export class DashReaderView extends ItemView {
 
   /**
    * Toggle breadcrumb visibility
+   * Uses effective setting (respects mobile profile)
    */
   private toggleBreadcrumbDisplay(): void {
-    const shouldHide = !this.settings.showBreadcrumb;
+    const shouldHide = !this.engine.getEffectiveShowBreadcrumb();
     if (this.breadcrumbEl) {
       this.breadcrumbEl.toggleClass(CSS_CLASSES.hidden, shouldHide);
     }
   }
 
   /**
-   * Opens DashReader in a new tab (fullscreen-like experience)
-   * Creates a new leaf/tab and transfers the current reading session to it
+   * Toggles fullscreen modal for immersive reading experience
+   * If modal is open, closes it. Otherwise opens a new one.
+   * Shares the current engine state with the modal.
    */
-  private async openInNewTab(): Promise<void> {
-    const { workspace } = this.app;
+  private openFullscreen(): void {
+    // If modal is already open, close it (toggle behavior)
+    if (this.fullscreenModal) {
+      this.fullscreenModal.close();
+      return;
+    }
 
-    // Create a new tab
-    const newLeaf = workspace.getLeaf('tab');
+    // Check if we have text loaded
+    if (this.engine.getTotalWords() === 0) {
+      return;
+    }
 
-    if (newLeaf) {
-      // Open DashReader view in the new tab
-      await newLeaf.setViewState({
-        type: VIEW_TYPE_DASHREADER,
-        active: true,
-      });
+    const modal = new FullscreenModal(
+      this.app,
+      this.engine,
+      this.settings,
+      () => {
+        // Callback: modal closed, restore callbacks
+        this.fullscreenModal = null;
+        this.engine.setCallbacks(
+          this.onWordChange.bind(this),
+          this.onComplete.bind(this)
+        );
+        // Update UI to reflect current state
+        updatePlayPauseButtons(this.dom, this.engine.getIsPlaying());
+        // Refresh sidebar display to show current position
+        this.refreshDisplayAfterFullscreen();
+      },
+      this.timeoutManager
+    );
 
-      // Reveal the new tab
-      void workspace.revealLeaf(newLeaf);
+    this.fullscreenModal = modal;
+    modal.open();
+  }
+
+  /**
+   * Refreshes the sidebar display after returning from fullscreen
+   * Shows the current word position and updates all UI elements
+   */
+  private refreshDisplayAfterFullscreen(): void {
+    const currentIndex = this.engine.getCurrentIndex();
+    const totalWords = this.engine.getTotalWords();
+    const words = this.engine.getWords();
+
+    // Update minimap position
+    if (this.minimapManager) {
+      this.minimapManager.updateCurrentPosition(currentIndex);
+    }
+
+    // Update progress bar
+    const progress = this.engine.getProgress();
+    this.dom.updateStyle('progressBar', 'width', `${progress}%`);
+
+    // Update stats
+    this.updateStats();
+
+    // If we're at a valid position, display that word
+    if (currentIndex > 0 && currentIndex < totalWords && words[currentIndex]) {
+      const word = words[currentIndex];
+
+      // Detect heading/callout markers
+      const headingMatch = word.match(/^\[H(\d)\]/);
+      const calloutMatch = word.match(/^\[CALLOUT:([\w-]+)\]/);
+
+      let displayText = word;
+      let headingLevel = 0;
+      let showSeparator = false;
+      let calloutType: string | undefined;
+
+      if (headingMatch) {
+        headingLevel = parseInt(headingMatch[1]);
+        displayText = word.replace(/^\[H\d\]/, '');
+        showSeparator = true;
+      } else if (calloutMatch) {
+        calloutType = calloutMatch[1];
+        displayText = word.replace(/^\[CALLOUT:[\w-]+\]/, '');
+        showSeparator = true;
+      }
+
+      this.wordDisplay.displayWord(displayText, headingLevel, showSeparator, calloutType);
+
+      // Update breadcrumb
+      const context = this.engine.getCurrentHeadingContext(currentIndex);
+      if (context.breadcrumb.length > 0 && this.breadcrumbManager) {
+        this.breadcrumbManager.updateBreadcrumb(context);
+      }
+    } else {
+      // Show ready message at beginning
+      const remainingWords = this.engine.getRemainingWords();
+      const durationText = this.statsFormatter.formatTime(this.engine.getEstimatedDuration());
+      this.wordDisplay.displayReadyMessage(
+        remainingWords,
+        totalWords,
+        currentIndex > 0 ? currentIndex : undefined,
+        durationText
+      );
     }
   }
 
@@ -777,6 +1098,7 @@ export class DashReaderView extends ItemView {
    * Shortcuts:
    * - C: Toggle controls (when not playing)
    * - S: Toggle stats (when not playing)
+   * - F: Open fullscreen mode
    * - Shift+Space: Play/Pause
    * - Arrow keys: Rewind/Forward, WPM adjustment
    * - Escape: Stop reading
@@ -796,6 +1118,13 @@ export class DashReaderView extends ItemView {
     if (e.key === 's' && !this.engine.getIsPlaying()) {
       e.preventDefault();
       this.togglePanel('stats');
+      return;
+    }
+
+    // Fullscreen mode
+    if (e.key === 'f' || e.key === 'F') {
+      e.preventDefault();
+      this.openFullscreen();
       return;
     }
 
@@ -1043,13 +1372,8 @@ export class DashReaderView extends ItemView {
     this.engine.setText(plainText, undefined, wordIndexFromCursor);
     this.state.update({ wordsRead: 0, startTime: 0 });
 
-    // Remove welcome message
-    const welcomeMsg = this.wordEl.querySelector(`.${CSS_CLASSES.welcome}`);
-    if (welcomeMsg) {
-      welcomeMsg.remove();
-    }
-
-    this.wordEl.empty();
+    // Note: Don't call wordEl.empty() here - WordDisplay manages its own content
+    // via contentEl.empty() in displayReadyMessage()
 
     // Update stats and display ready message
     this.updateStatsDisplay(wordIndexFromCursor, source);
@@ -1079,10 +1403,20 @@ export class DashReaderView extends ItemView {
     this.engine.updateSettings(settings);
 
     if (this.wordEl) {
-      this.wordEl.style.fontSize = `${settings.fontSize}px`;
+      // Use effective font size (respects mobile profile)
+      this.wordEl.style.fontSize = `${this.engine.getEffectiveFontSize()}px`;
       this.wordEl.style.fontFamily = settings.fontFamily;
       this.wordEl.style.color = settings.fontColor;
     }
+
+    // Update focus bars visibility
+    const wordEl = this.dom.get('wordEl');
+    if (wordEl) {
+      wordEl.toggleClass('dashreader-focus-enabled', settings.showFocusBars);
+    }
+
+    // Update breadcrumb visibility based on effective setting
+    this.toggleBreadcrumbDisplay();
 
     this.dom.updateText('wpmDisplay', `${settings.wpm} WPM`);
   }

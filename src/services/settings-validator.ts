@@ -33,6 +33,8 @@ const LIMITS = {
   chunkSize: { min: 1, max: 10 },
   fontSize: { min: 12, max: 120 },
   contextWords: { min: 0, max: 20 },
+  contextFontSize: { min: 10, max: 32 },
+  minTokenFontSize: { min: 8, max: 48 },
   autoStartDelay: { min: 0, max: 60 },
   accelerationDuration: { min: 1, max: 300 },
   accelerationTargetWpm: { min: 50, max: 5000 },
@@ -137,6 +139,18 @@ export function validateSettings(partial: Partial<DashReaderSettings> | null | u
       LIMITS.contextWords.min,
       LIMITS.contextWords.max
     ),
+    contextFontSize: validateNumber(
+      partial.contextFontSize,
+      DEFAULT_SETTINGS.contextFontSize,
+      LIMITS.contextFontSize.min,
+      LIMITS.contextFontSize.max
+    ),
+    minTokenFontSize: validateNumber(
+      partial.minTokenFontSize,
+      DEFAULT_SETTINGS.minTokenFontSize,
+      LIMITS.minTokenFontSize.min,
+      LIMITS.minTokenFontSize.max
+    ),
     autoStartDelay: validateNumber(
       partial.autoStartDelay,
       DEFAULT_SETTINGS.autoStartDelay,
@@ -222,6 +236,7 @@ export function validateSettings(partial: Partial<DashReaderSettings> | null | u
 
     // Boolean settings
     showContext: validateBoolean(partial.showContext, DEFAULT_SETTINGS.showContext),
+    showFocusBars: validateBoolean(partial.showFocusBars, DEFAULT_SETTINGS.showFocusBars),
     showMinimap: validateBoolean(partial.showMinimap, DEFAULT_SETTINGS.showMinimap),
     showBreadcrumb: validateBoolean(partial.showBreadcrumb, DEFAULT_SETTINGS.showBreadcrumb),
     enableMicropause: validateBoolean(partial.enableMicropause, DEFAULT_SETTINGS.enableMicropause),
@@ -230,5 +245,40 @@ export function validateSettings(partial: Partial<DashReaderSettings> | null | u
     showStats: validateBoolean(partial.showStats, DEFAULT_SETTINGS.showStats),
     enableSlowStart: validateBoolean(partial.enableSlowStart, DEFAULT_SETTINGS.enableSlowStart),
     enableAcceleration: validateBoolean(partial.enableAcceleration, DEFAULT_SETTINGS.enableAcceleration),
+
+    // Mobile override settings
+    mobileFontSize: validateNumber(
+      partial.mobileFontSize,
+      DEFAULT_SETTINGS.mobileFontSize,
+      LIMITS.fontSize.min,
+      LIMITS.fontSize.max
+    ),
+    mobileWpm: validateNumber(
+      partial.mobileWpm,
+      DEFAULT_SETTINGS.mobileWpm,
+      LIMITS.wpm.min,
+      LIMITS.wpm.max
+    ),
+    mobileChunkSize: validateNumber(
+      partial.mobileChunkSize,
+      DEFAULT_SETTINGS.mobileChunkSize,
+      LIMITS.chunkSize.min,
+      LIMITS.chunkSize.max
+    ),
+    mobileShowBreadcrumb: validateBoolean(partial.mobileShowBreadcrumb, DEFAULT_SETTINGS.mobileShowBreadcrumb),
+    mobileEnableSlowStart: validateBoolean(partial.mobileEnableSlowStart, DEFAULT_SETTINGS.mobileEnableSlowStart),
+    mobileEnableMicropause: validateBoolean(partial.mobileEnableMicropause, DEFAULT_SETTINGS.mobileEnableMicropause),
+    mobileContextWords: validateNumber(
+      partial.mobileContextWords,
+      DEFAULT_SETTINGS.mobileContextWords,
+      LIMITS.contextWords.min,
+      LIMITS.contextWords.max
+    ),
+    mobileContextFontSize: validateNumber(
+      partial.mobileContextFontSize,
+      DEFAULT_SETTINGS.mobileContextFontSize,
+      LIMITS.contextFontSize.min,
+      LIMITS.contextFontSize.max
+    ),
   };
 }

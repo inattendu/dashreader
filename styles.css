@@ -1129,11 +1129,10 @@
   text-align: center;
   color: var(--text-normal);
   min-height: 150px;
-  width: 100%; /* Fill container width for ORP centering */
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 40px 0; /* Horizontal padding removed for accurate centering */
+  /* Don't use width:100% - let focus bars size to content */
+  min-width: 300px;
+  max-width: 90%;
+  padding: 40px 50px;
   user-select: none;
   letter-spacing: 0.02em;
   /* Allow ORP-shifted content to overflow */
@@ -1143,31 +1142,8 @@
   z-index: 1;
 }
 
-/* Fullscreen word content - flex container for centering */
-.dashreader-fullscreen-word .dashreader-word-content {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  width: 100%;
-}
-
-/* Fullscreen word with heading - allow expansion */
-.dashreader-fullscreen-word .dashreader-word-with-heading {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  width: 100%;
-}
-
-/* Fullscreen viewport - flex layout like fork for proper sizing */
-.dashreader-fullscreen-word .dashreader-orp-viewport {
-  flex: 1 1 auto;
-  min-width: 0;
-  max-width: 100%;
-  overflow: hidden;
-  display: flex;
-  justify-content: center;
-}
+/* Fullscreen: no special overrides needed - use same layout as sidebar
+   The text will display at full size (fontSize * 2) without shrinking */
 
 /* Minimap container in fullscreen - clickable when paused */
 .dashreader-fullscreen-minimap-container {

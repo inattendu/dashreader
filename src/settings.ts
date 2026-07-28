@@ -1,5 +1,244 @@
 import { App, PluginSettingTab, Setting } from 'obsidian';
 import DashReaderPlugin from '../main';
+import { getInstalledFontFamilies } from './services/font-family';
+
+/**
+ * FontFamilySuggest - Autocomplete dropdown for font selection
+ *
+ * Features:
+ * - Filters fonts as user types
+ * - Keyboard navigation (↑↓ Enter Escape)
+ * - Shows preview of selected font
+ * - Falls back gracefully if no fonts detected
+ */
+class FontFamilySuggest {
+  private inputEl: HTMLInputElement;
+  private suggestEl: HTMLDivElement;
+  private fonts: string[] = [];
+  private filteredFonts: string[] = [];
+  private selectedIndex = -1;
+  private isOpen = false;
+  private onSelect: (value: string) => void;
+
+  constructor(
+    containerEl: HTMLElement,
+    currentValue: string,
+    onSelect: (value: string) => void
+  ) {
+    this.onSelect = onSelect;
+
+    // Create input container
+    const inputContainer = containerEl.createDiv({
+      cls: 'dashreader-font-suggest-container'
+    });
+
+    // Create text input
+    this.inputEl = inputContainer.createEl('input', {
+      type: 'text',
+      value: currentValue === 'inherit' ? '' : currentValue,
+      placeholder: 'Type to search fonts...',
+      cls: 'dashreader-font-suggest-input'
+    });
+
+    // Preview the current font
+    if (currentValue && currentValue !== 'inherit') {
+      this.inputEl.style.fontFamily = currentValue;
+    }
+
+    // Create dropdown container
+    this.suggestEl = inputContainer.createDiv({
+      cls: 'dashreader-font-suggest-dropdown'
+    });
+
+    // Load fonts and setup events
+    void this.loadFonts();
+    this.setupEvents();
+  }
+
+  private async loadFonts(): Promise<void> {
+    // Add system defaults first
+    this.fonts = [
+      'inherit',
+      'system-ui',
+      'serif',
+      'sans-serif',
+      'monospace',
+      '---', // separator
+      ...await getInstalledFontFamilies()
+    ];
+    this.filteredFonts = this.fonts;
+  }
+
+  private setupEvents(): void {
+    // Input events
+    this.inputEl.addEventListener('input', () => this.onInput());
+    this.inputEl.addEventListener('focus', () => this.open());
+    this.inputEl.addEventListener('blur', () => {
+      // Delay to allow click on dropdown
+      setTimeout(() => this.close(), 150);
+    });
+    this.inputEl.addEventListener('keydown', (e) => this.onKeydown(e));
+  }
+
+  private onInput(): void {
+    const query = this.inputEl.value.toLowerCase().trim();
+
+    if (!query) {
+      this.filteredFonts = this.fonts;
+    } else {
+      this.filteredFonts = this.fonts.filter(font =>
+        font !== '---' && font.toLowerCase().includes(query)
+      );
+    }
+
+    this.selectedIndex = -1;
+    this.render();
+    this.open();
+  }
+
+  private onKeydown(e: KeyboardEvent): void {
+    if (!this.isOpen) {
+      if (e.key === 'ArrowDown' || e.key === 'Enter') {
+        this.open();
+        e.preventDefault();
+      }
+      return;
+    }
+
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault();
+        this.selectNext();
+        break;
+      case 'ArrowUp':
+        e.preventDefault();
+        this.selectPrevious();
+        break;
+      case 'Enter':
+        e.preventDefault();
+        if (this.selectedIndex >= 0 && this.filteredFonts[this.selectedIndex]) {
+          this.selectFont(this.filteredFonts[this.selectedIndex]);
+        }
+        break;
+      case 'Escape':
+        e.preventDefault();
+        this.close();
+        break;
+    }
+  }
+
+  private selectNext(): void {
+    let next = this.selectedIndex + 1;
+    // Skip separators
+    while (next < this.filteredFonts.length && this.filteredFonts[next] === '---') {
+      next++;
+    }
+    if (next < this.filteredFonts.length) {
+      this.selectedIndex = next;
+      this.render();
+      this.scrollToSelected();
+    }
+  }
+
+  private selectPrevious(): void {
+    let prev = this.selectedIndex - 1;
+    // Skip separators
+    while (prev >= 0 && this.filteredFonts[prev] === '---') {
+      prev--;
+    }
+    if (prev >= 0) {
+      this.selectedIndex = prev;
+      this.render();
+      this.scrollToSelected();
+    }
+  }
+
+  private scrollToSelected(): void {
+    const items = this.suggestEl.querySelectorAll('.dashreader-font-suggest-item');
+    if (this.selectedIndex >= 0 && items[this.selectedIndex]) {
+      items[this.selectedIndex].scrollIntoView({ block: 'nearest' });
+    }
+  }
+
+  private selectFont(font: string): void {
+    if (font === '---') return;
+
+    const displayValue = font === 'inherit' ? '' : font;
+    this.inputEl.value = displayValue;
+
+    // Preview the font
+    if (font !== 'inherit' && font !== 'system-ui') {
+      this.inputEl.style.fontFamily = font;
+    } else {
+      this.inputEl.style.fontFamily = '';
+    }
+
+    this.onSelect(font);
+    this.close();
+  }
+
+  private open(): void {
+    if (this.isOpen) return;
+    this.isOpen = true;
+    this.render();
+    this.suggestEl.classList.add('is-open');
+  }
+
+  private close(): void {
+    this.isOpen = false;
+    this.suggestEl.classList.remove('is-open');
+  }
+
+  private render(): void {
+    this.suggestEl.empty();
+
+    const maxItems = 15;
+    const itemsToShow = this.filteredFonts.slice(0, maxItems);
+
+    itemsToShow.forEach((font, index) => {
+      if (font === '---') {
+        // Render separator
+        this.suggestEl.createDiv({ cls: 'dashreader-font-suggest-separator' });
+        return;
+      }
+
+      const item = this.suggestEl.createDiv({
+        cls: 'dashreader-font-suggest-item'
+      });
+
+      if (index === this.selectedIndex) {
+        item.classList.add('is-selected');
+      }
+
+      // Font name with preview
+      const displayName = font === 'inherit' ? 'Default (theme)' : font;
+      item.setText(displayName);
+
+      // Apply font preview (except for generic keywords)
+      if (!['inherit', 'system-ui', 'serif', 'sans-serif', 'monospace'].includes(font)) {
+        item.style.fontFamily = font;
+      }
+
+      item.addEventListener('mousedown', (e) => {
+        e.preventDefault(); // Prevent blur
+        this.selectFont(font);
+      });
+
+      item.addEventListener('mouseenter', () => {
+        this.selectedIndex = index;
+        this.render();
+      });
+    });
+
+    // Show "more results" hint if truncated
+    if (this.filteredFonts.length > maxItems) {
+      const hint = this.suggestEl.createDiv({
+        cls: 'dashreader-font-suggest-hint',
+        text: `${this.filteredFonts.length - maxItems} more fonts...`
+      });
+    }
+  }
+}
 
 export class DashReaderSettingTab extends PluginSettingTab {
   plugin: DashReaderPlugin;
@@ -122,19 +361,126 @@ export class DashReaderSettingTab extends PluginSettingTab {
       }
     );
 
-    new Setting(containerEl)
+    // Font family with autocomplete suggest
+    const fontSetting = new Setting(containerEl)
       .setName('Font family')
-      .setDesc('Font family for text display')
-      .addDropdown(dropdown => dropdown
-        .addOption('inherit', 'Default')
-        .addOption('monospace', 'Monospace')
-        .addOption('serif', 'Serif')
-        .addOption('sans-serif', 'Sans-serif')
-        .setValue(this.plugin.settings.fontFamily)
+      .setDesc('Type to search system fonts, or choose a generic family');
+
+    new FontFamilySuggest(
+      fontSetting.controlEl,
+      this.plugin.settings.fontFamily,
+      async (value) => {
+        this.plugin.settings.fontFamily = value;
+        await this.plugin.saveSettings();
+      }
+    );
+
+    // Section: Mobile Profile Override
+    new Setting(containerEl).setName("Mobile override").setHeading();
+    containerEl.createEl('p', {
+      text: 'These settings override desktop values when running on iOS/Android.',
+      cls: 'setting-item-description'
+    });
+
+    const mobileWpmSetting = new Setting(containerEl)
+      .setName('Mobile: Words per minute')
+      .setDesc('Reading speed on mobile (50-5000)');
+    this.createSliderWithInput(
+      mobileWpmSetting,
+      50, 5000, 25,
+      this.plugin.settings.mobileWpm,
+      '',
+      async (value) => {
+        this.plugin.settings.mobileWpm = value;
+        await this.plugin.saveSettings();
+      }
+    );
+
+    const mobileFontSizeSetting = new Setting(containerEl)
+      .setName('Mobile: Font size')
+      .setDesc('Font size on mobile in pixels (20-120px)');
+    this.createSliderWithInput(
+      mobileFontSizeSetting,
+      20, 120, 4,
+      this.plugin.settings.mobileFontSize,
+      'px',
+      async (value) => {
+        this.plugin.settings.mobileFontSize = value;
+        await this.plugin.saveSettings();
+      }
+    );
+
+    const mobileChunkSetting = new Setting(containerEl)
+      .setName('Mobile: Words at a time')
+      .setDesc('Number of words displayed on mobile (1-5)');
+    this.createSliderWithInput(
+      mobileChunkSetting,
+      1, 5, 1,
+      this.plugin.settings.mobileChunkSize,
+      '',
+      async (value) => {
+        this.plugin.settings.mobileChunkSize = value;
+        await this.plugin.saveSettings();
+      }
+    );
+
+    new Setting(containerEl)
+      .setName('Mobile: Show breadcrumb')
+      .setDesc('Display breadcrumb navigation on mobile')
+      .addToggle(toggle => toggle
+        .setValue(this.plugin.settings.mobileShowBreadcrumb)
         .onChange(async (value) => {
-          this.plugin.settings.fontFamily = value;
+          this.plugin.settings.mobileShowBreadcrumb = value;
           await this.plugin.saveSettings();
         }));
+
+    new Setting(containerEl)
+      .setName('Mobile: Slow start')
+      .setDesc('Enable slow start on mobile')
+      .addToggle(toggle => toggle
+        .setValue(this.plugin.settings.mobileEnableSlowStart)
+        .onChange(async (value) => {
+          this.plugin.settings.mobileEnableSlowStart = value;
+          await this.plugin.saveSettings();
+        }));
+
+    new Setting(containerEl)
+      .setName('Mobile: Micropause')
+      .setDesc('Enable micropause on mobile')
+      .addToggle(toggle => toggle
+        .setValue(this.plugin.settings.mobileEnableMicropause)
+        .onChange(async (value) => {
+          this.plugin.settings.mobileEnableMicropause = value;
+          await this.plugin.saveSettings();
+        }));
+
+    const mobileContextWordsSetting = new Setting(containerEl)
+      .setName('Mobile: Context words')
+      .setDesc('Number of context words on mobile (0-20)');
+    this.createSliderWithInput(
+      mobileContextWordsSetting,
+      0, 20, 1,
+      this.plugin.settings.mobileContextWords,
+      '',
+      async (value) => {
+        this.plugin.settings.mobileContextWords = value;
+        await this.plugin.saveSettings();
+      }
+    );
+
+    const mobileContextFontSizeSetting = new Setting(containerEl)
+      .setName('Mobile: Context font size')
+      .setDesc('Font size for context text on mobile (10-32 px)');
+    this.createSliderWithInput(
+      mobileContextFontSizeSetting,
+      10, 32, 1,
+      this.plugin.settings.mobileContextFontSize,
+      'px',
+      async (value) => {
+        this.plugin.settings.mobileContextFontSize = value;
+        await this.plugin.saveSettings();
+      }
+    );
 
     // Section: Reading Enhancements
     new Setting(containerEl).setName("Reading enhancements").setHeading();
@@ -249,6 +595,44 @@ export class DashReaderSettingTab extends PluginSettingTab {
         await this.plugin.saveSettings();
       }
     );
+
+    const contextFontSizeSetting = new Setting(containerEl)
+      .setName('Context font size')
+      .setDesc('Font size for context text (10-32 px)');
+    this.createSliderWithInput(
+      contextFontSizeSetting,
+      10, 32, 1,
+      this.plugin.settings.contextFontSize,
+      'px',
+      async (value) => {
+        this.plugin.settings.contextFontSize = value;
+        await this.plugin.saveSettings();
+      }
+    );
+
+    const minTokenFontSizeSetting = new Setting(containerEl)
+      .setName('Minimum token font size')
+      .setDesc('Minimum font size for long words that need shrinking (8-48 px)');
+    this.createSliderWithInput(
+      minTokenFontSizeSetting,
+      8, 48, 1,
+      this.plugin.settings.minTokenFontSize,
+      'px',
+      async (value) => {
+        this.plugin.settings.minTokenFontSize = value;
+        await this.plugin.saveSettings();
+      }
+    );
+
+    new Setting(containerEl)
+      .setName('Show focus bars')
+      .setDesc('Display Reedy-style horizontal bars and vertical ORP indicator for enhanced focus')
+      .addToggle(toggle => toggle
+        .setValue(this.plugin.settings.showFocusBars)
+        .onChange(async (value) => {
+          this.plugin.settings.showFocusBars = value;
+          await this.plugin.saveSettings();
+        }));
 
     // === Navigation Display ===
     new Setting(containerEl).setName("Navigation").setHeading();

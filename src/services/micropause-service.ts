@@ -217,9 +217,10 @@ export class MicropauseService {
    * Recreates strategies with updated multipliers
    *
    * @param settings - New settings
+   * @param enableOverride - Optional override for enableMicropause (used by mobile profile)
    */
-  updateSettings(settings: DashReaderSettings): void {
-    this.enabled = settings.enableMicropause;
+  updateSettings(settings: DashReaderSettings, enableOverride?: boolean): void {
+    this.enabled = enableOverride !== undefined ? enableOverride : settings.enableMicropause;
 
     // Recreate strategies with new multipliers
     this.strategies = [

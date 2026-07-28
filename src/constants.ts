@@ -249,6 +249,23 @@ export const ICONS = {
   book: '📖',
   /** Expand to new tab */
   expand: '⤢',
+  // Lucide icons for fullscreen controls
+  /** Jump to start (Lucide) */
+  jumpStart: 'lucide:chevrons-left',
+  /** Previous heading (Lucide) */
+  prevHeading: 'lucide:arrow-up',
+  /** Rewind/left arrow (Lucide) */
+  arrowLeft: 'lucide:arrow-left',
+  /** Forward/right arrow (Lucide) */
+  arrowRight: 'lucide:arrow-right',
+  /** Next heading (Lucide) */
+  nextHeading: 'lucide:arrow-down',
+  /** Jump to end (Lucide) */
+  jumpEnd: 'lucide:chevrons-right',
+  /** Play (Lucide) */
+  playLucide: 'lucide:play',
+  /** Pause (Lucide) */
+  pauseLucide: 'lucide:pause',
 } as const;
 
 // ============================================================================
